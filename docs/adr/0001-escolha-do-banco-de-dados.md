@@ -1,8 +1,8 @@
 
 # ADR 0001 — Escolha do banco de dados: PostgreSQL
 
-- **Status:** Aceita
-- **Data:** 2026-06-27
+- **Status:** Aceita (atualizada na Fase 3: Postgres gerenciado no Amazon RDS)
+- **Data:** 2026-06-27 · atualização 2026-10-21
 - **Contexto da decisão:** Requisito técnico do Tech Challenge — "a escolha do
   banco de dados é livre, mas é necessário justificar a preferência pelo banco
   utilizado".
@@ -17,11 +17,11 @@ de consistência:
 - **Transações multi-tabela**: ao persistir a OS, o repositório trata o agregado
   como fonte de verdade e, dentro de uma transação, **apaga e recria** os filhos
   (histórico, orçamentos e suas linhas), respeitando a ordem de chaves
-  estrangeiras (ver `prisma-ordem-servico.repository.ts`).
+  estrangeiras (ver `prisma-ordem-servico.repositorio.ts`).
 - **Concorrência sem corrida**: a reserva de peças usa um **UPDATE condicional
   atômico** (`UPDATE peca SET reservado = reservado + N WHERE saldoFisico -
   reservado >= N`), que impede dupla reserva sob acesso simultâneo
-  (`prisma-peca.repository.ts`).
+  (`prisma-peca.repositorio.ts`).
 - **Optimistic lock**: a OS é atualizada com `WHERE id = ? AND versao = ?`,
   detectando escrita concorrente e lançando conflito.
 - **Dinheiro exato**: preços congelados e totais usam `Decimal(10,2)` — sem ruído
@@ -95,3 +95,13 @@ Justificativa:
   `5433` no host).
 - Dinheiro em `Decimal(10,2)`; chaves em `uuid`; histórico de status e versão
   (optimistic lock) modelados explicitamente.
+
+## Atualização — Fase 3 (2026-10-21)
+
+O banco continua **PostgreSQL** (mesma versão major, 16), mas deixa de rodar como StatefulSet no
+Kubernetes e passa a ser **gerenciado pelo Amazon RDS** (`db.t3.micro`, sem IP público, acesso só do
+cluster EKS e das Lambdas). Homologação e produção ficam em **schemas** separados do mesmo database.
+
+A justificativa formal da escolha, o diagrama ER, a explicação dos relacionamentos e os ajustes no
+modelo relacional estão em [`docs/banco-de-dados.md`](../banco-de-dados.md). A infraestrutura está
+no repositório [`oficina-infra-db`](https://github.com/madurubini/oficina-infra-db).
