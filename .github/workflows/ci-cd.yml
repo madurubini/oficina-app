@@ -1,19 +1,36 @@
-# O job de deploy sobe um Minikube dentro do próprio runner: um runner
-# hospedado não tem rota até um cluster local, e assim o deploy é verificado a
-# cada push sem depender de nenhuma máquina ligada.
+# Pipeline da aplicação.
+#
+# - Pull request (para homolog ou main): build e testes. É o check obrigatório
+#   da ruleset: sem ele verde, o merge fica bloqueado.
+# - Push em homolog: testes → imagem no ECR → deploy no namespace homolog.
+# - Push em main: o mesmo, no namespace prod.
+#
+# Os dois ambientes vivem no mesmo cluster EKS (repo oficina-infra-k8s) e no
+# mesmo RDS (repo oficina-infra-db), separados por namespace e por schema.
+# Os dois precisam estar no ar antes do deploy (ordem: ① → ② → ③).
 name: CI/CD
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+    branches: [homolog, main]
+  push:
+    branches: [homolog, main]
   workflow_dispatch:
 
+# Dois deploys no mesmo ambiente ao mesmo tempo disputariam o Job de migrations.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
 env:
-  IMAGEM: oficina-api
-  TAG: local
-  NAMESPACE: oficina
+  AWS_REGION: us-east-1
+  # Nomes criados pelos repos de infraestrutura.
+  CLUSTER: oficina-eks
+  ECR_REPOSITORIO: oficina-app
+  RDS_IDENTIFICADOR: oficina-db
+
+permissions:
+  contents: read
 
 jobs:
   qualidade:
@@ -66,124 +83,123 @@ jobs:
           DATABASE_URL_E2E: postgresql://oficina:oficina@localhost:5433/oficina_e2e?schema=public
         run: npm run test:e2e
 
-  imagem:
-    name: Imagem Docker
+  deploy:
+    name: Deploy no EKS
     runs-on: ubuntu-latest
     needs: qualidade
+    if: github.event_name == 'push'
+    # O environment registra cada deploy na aba "Deployments" do repositório.
+    environment: ${{ github.ref_name == 'main' && 'producao' || 'homolog' }}
+    env:
+      # O namespace dá nome ao overlay do Kustomize e ao schema do banco.
+      NAMESPACE: ${{ github.ref_name == 'main' && 'prod' || 'homolog' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build da imagem
-        run: docker build -t ${{ env.IMAGEM }}:${{ env.TAG }} .
-
-      # Sem registry no fluxo, a imagem viaja entre jobs como arquivo.
-      - name: Exportar a imagem para o próximo job
-        run: docker save ${{ env.IMAGEM }}:${{ env.TAG }} -o imagem.tar
-
-      - name: Publicar artefato
-        uses: actions/upload-artifact@v4
+      - name: Credenciais da AWS (sessão do Learner Lab)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          name: imagem-docker
-          path: imagem.tar
-          retention-days: 1
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-  infraestrutura:
-    name: Validação do Terraform
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Login no ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.15.9
-
-      - name: Formatação
-        run: terraform fmt -check -recursive
-        working-directory: infra
-
-      # -backend=false: aqui só validamos a sintaxe, não há cluster nem estado.
-      - name: Inicializar sem backend
-        run: terraform init -backend=false
-        working-directory: infra
-
-      - name: Validar
-        run: terraform validate
-        working-directory: infra
-
-  deploy:
-    name: Deploy no Kubernetes
-    runs-on: ubuntu-latest
-    needs: [imagem, infraestrutura]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Subir um cluster Minikube no runner
-        uses: medyagh/setup-minikube@latest
-        with:
-          cpus: 2
-          memory: 4000mb
-          addons: metrics-server
-
-      - name: Baixar a imagem do job anterior
-        uses: actions/download-artifact@v4
-        with:
-          name: imagem-docker
-
-      - name: Carregar a imagem no cluster
+      # A tag é o SHA do commit: cada deploy aponta para uma imagem diferente,
+      # então o rollout sempre troca os pods e dá para saber o que está no ar.
+      - name: Build e push da imagem
+        id: imagem
         run: |
-          docker load -i imagem.tar
-          minikube image load ${{ env.IMAGEM }}:${{ env.TAG }}
+          IMAGEM="${{ steps.ecr.outputs.registry }}/$ECR_REPOSITORIO:$GITHUB_SHA"
+          docker build -t "$IMAGEM" .
+          docker push "$IMAGEM"
+          echo "nome=$IMAGEM" >> "$GITHUB_OUTPUT"
 
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.15.9
-          terraform_wrapper: false
+      - name: Apontar o kubectl para o cluster
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER"
 
-      - name: Provisionar namespace, Secrets e banco de dados (Terraform)
+      # O Secret nasce aqui, e não num arquivo do repo: a senha do banco e o
+      # segredo do JWT ficam só nos Secrets do GitHub. Endereço, usuário e nome
+      # do banco são lidos do próprio RDS, sem copiar nada à mão do repo ②.
+      - name: Namespace e Secret do ambiente
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
         run: |
-          terraform init -input=false
-          terraform apply -input=false -auto-approve \
-            -var="banco_senha=${{ secrets.BANCO_SENHA || 'senha-de-ci' }}" \
-            -var="jwt_secret=${{ secrets.JWT_SECRET || 'segredo-de-ci' }}"
-        working-directory: infra
+          read -r DB_HOST DB_PORTA DB_USUARIO DB_NOME <<< "$(aws rds describe-db-instances \
+            --db-instance-identifier "$RDS_IDENTIFICADOR" \
+            --query 'DBInstances[0].[Endpoint.Address,Endpoint.Port,MasterUsername,DBName]' \
+            --output text)"
 
-      - name: Aplicar os manifestos da aplicação
+          # Caracteres especiais na senha quebrariam a URL; @uri os escapa.
+          SENHA=$(jq -rn --arg s "$DB_PASSWORD" '$s|@uri')
+          echo "::add-mask::$SENHA"
+          DATABASE_URL="postgresql://$DB_USUARIO:$SENHA@$DB_HOST:$DB_PORTA/$DB_NOME?schema=$NAMESPACE"
+
+          kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic oficina-secrets -n "$NAMESPACE" \
+            --from-literal=DATABASE_URL="$DATABASE_URL" \
+            --from-literal=JWT_SECRET="$JWT_SECRET" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Aplicar os manifestos
         run: |
-          kubectl apply -f k8s/configmap.yaml
-          kubectl apply -f k8s/job-migracoes.yaml
-          kubectl apply -f k8s/deployment.yaml
-          kubectl apply -f k8s/service.yaml
-          kubectl apply -f k8s/hpa.yaml
+          cd "k8s/overlays/$NAMESPACE"
+          kustomize edit set image "oficina-api=${{ steps.imagem.outputs.nome }}"
+          # Os campos de um Job concluído são imutáveis: recria a cada deploy.
+          kubectl delete job migracoes -n "$NAMESPACE" --ignore-not-found
+          kubectl apply -k .
 
       - name: Aguardar as migrations
         run: |
           kubectl wait --for=condition=complete job/migracoes \
-            -n ${{ env.NAMESPACE }} --timeout=300s
-          kubectl logs job/migracoes -n ${{ env.NAMESPACE }} --tail=20
+            -n "$NAMESPACE" --timeout=300s
+          kubectl logs job/migracoes -n "$NAMESPACE" --tail=20
 
       - name: Aguardar a API entrar no ar
         run: |
           kubectl rollout status deployment/oficina-api \
-            -n ${{ env.NAMESPACE }} --timeout=300s
+            -n "$NAMESPACE" --timeout=300s
 
-      - name: Smoke test
+      # Na primeira vez o Load Balancer leva alguns minutos para ganhar endereço
+      # e o DNS dele mais um pouco para propagar; daí as esperas em laço.
+      - name: Smoke test pelo Load Balancer
         run: |
-          URL="http://$(minikube ip):30080"
+          for i in $(seq 1 30); do
+            HOST=$(kubectl get svc oficina-api -n "$NAMESPACE" \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            [ -n "$HOST" ] && break
+            echo "Load Balancer ainda sem endereço; aguardando..."
+            sleep 10
+          done
+          URL="http://$HOST"
           echo "API em $URL"
 
-          curl -fsS "$URL/api/v1/health/live"  | tee /dev/stderr | grep -q '"status":"ok"'
-          curl -fsS "$URL/api/v1/health/ready" | tee /dev/stderr | grep -q '"database":{"status":"up"}'
+          for i in $(seq 1 30); do
+            curl -fsS "$URL/api/v1/health/ready" > ready.json 2>/dev/null && break
+            echo "Load Balancer ainda não responde; aguardando..."
+            sleep 10
+          done
+          cat ready.json
+          grep -q '"database":{"status":"up"}' ready.json
 
           curl -fsS -X POST "$URL/api/v1/auth/login" \
             -H 'Content-Type: application/json' \
             -d '{"username":"gestor","senha":"gestor123"}' \
             | grep -q accessToken
 
-          echo "Smoke test concluído com sucesso."
+          {
+            echo "### Deploy em \`$NAMESPACE\`"
+            echo "- Imagem: \`${{ steps.imagem.outputs.nome }}\`"
+            echo "- Swagger: $URL/api/docs"
+            echo "- Saúde: $URL/api/v1/health/ready"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Estado final do cluster
+      - name: Estado final do namespace
         if: always()
         run: |
-          kubectl get all,pvc,configmap,secret -n ${{ env.NAMESPACE }}
-          kubectl describe hpa oficina-api -n ${{ env.NAMESPACE }} || true
+          kubectl get all,configmap,secret -n "$NAMESPACE" || true
+          kubectl describe hpa oficina-api -n "$NAMESPACE" || true

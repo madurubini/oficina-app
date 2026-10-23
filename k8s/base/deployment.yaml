@@ -2,11 +2,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: oficina-api
-  namespace: oficina
   labels:
     app.kubernetes.io/name: oficina-api
-    app.kubernetes.io/part-of: workshop-manager
+    app.kubernetes.io/part-of: oficina
 spec:
+  # Ponto de partida; depois do deploy quem decide o número de réplicas é o HPA.
   replicas: 2
   selector:
     matchLabels:
@@ -23,9 +23,9 @@ spec:
     spec:
       containers:
         - name: api
-          image: oficina-api:local
-          # A imagem é carregada no cluster (make imagem), não vem de registry.
-          imagePullPolicy: IfNotPresent
+          # Nome lógico: cada overlay troca pelo endereço do ECR com a tag do
+          # commit (kustomize edit set image, no pipeline).
+          image: oficina-api
           ports:
             - name: http
               containerPort: 3000

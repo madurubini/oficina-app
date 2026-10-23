@@ -1,0 +1,11 @@
+# O que é igual nos dois ambientes. Não tem namespace nem endereço de imagem:
+# quem define é cada overlay (overlays/homolog e overlays/prod).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - configmap.yaml
+  - job-migracoes.yaml
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml

@@ -1,61 +1,40 @@
-# Atalhos do ambiente local. Os comandos completos estão no README.
+# Atalhos para acompanhar a aplicação no EKS. O deploy em si é do pipeline
+# (push em homolog ou main); aqui ficam só consultas e a demonstração do HPA.
 #   make ajuda
+#
+# Pré-requisitos: credenciais do Learner Lab em ~/.aws/credentials e o cluster
+# no ar (repo oficina-infra-k8s). Ambiente padrão: homolog.
 
 SHELL := /bin/bash
-NAMESPACE ?= oficina
-IMAGEM    ?= oficina-api:local
+REGIAO    ?= us-east-1
+CLUSTER   ?= oficina-eks
+NAMESPACE ?= homolog
 
-.PHONY: ajuda cluster infra imagem manifestos deploy url carga sem-carga estado logs testes destruir
+.PHONY: ajuda kubeconfig url estado logs carga sem-carga testes
 
 ajuda: ## Lista os alvos
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-cluster: ## Sobe o Minikube e habilita o metrics-server (necessário para o HPA)
-	minikube start --driver=docker --cpus=4 --memory=6144
-	minikube addons enable metrics-server
+kubeconfig: ## Aponta o kubectl para o cluster EKS
+	aws eks update-kubeconfig --region $(REGIAO) --name $(CLUSTER)
 
-infra: ## Provisiona namespace, Secrets e Postgres com Terraform
-	cd infra && terraform init -input=false && terraform apply -input=false -auto-approve
-
-imagem: ## Constrói a imagem DENTRO do daemon do Minikube
-	# Buildar no daemon do cluster dispensa registry e evita o cache de tag antiga
-	# que o `minikube image load` deixa quando a tag já existe.
-	eval $$(minikube docker-env) && docker build -t $(IMAGEM) .
-
-manifestos: ## Aplica os manifestos da aplicação
-	# O Job é recriado porque os campos de um Job concluído são imutáveis.
-	kubectl delete job migracoes -n $(NAMESPACE) --ignore-not-found
-	kubectl apply -f k8s/configmap.yaml -f k8s/job-migracoes.yaml \
-	              -f k8s/deployment.yaml -f k8s/service.yaml -f k8s/hpa.yaml
-	kubectl wait --for=condition=complete job/migracoes -n $(NAMESPACE) --timeout=300s
-	kubectl rollout restart deployment/oficina-api -n $(NAMESPACE)
-	kubectl rollout status  deployment/oficina-api -n $(NAMESPACE) --timeout=300s
-
-deploy: infra imagem manifestos ## Ciclo completo: infra + imagem + manifestos
-	@$(MAKE) --no-print-directory url
-
-url: ## Mostra a URL do Swagger e da sonda de saúde
-	# /api/v1 é só o prefixo global do Nest — não existe rota na raiz, então
-	# acessá-la devolve 404. O health check é o endpoint de fumaça equivalente.
-	@echo "Swagger: http://$$(minikube ip):30080/api/docs"
-	@echo "Saúde:   http://$$(minikube ip):30080/api/v1/health"
-
-carga: ## Sobe o gerador de carga para ver o HPA escalar
-	kubectl apply -f k8s/gerador-carga.yaml
-	@echo "Acompanhe com: watch kubectl get hpa,pods -n $(NAMESPACE)"
-
-sem-carga: ## Remove o gerador de carga
-	kubectl delete -f k8s/gerador-carga.yaml --ignore-not-found
+url: ## Mostra a URL do Swagger e da sonda de saúde do ambiente
+	@HOST=$$(kubectl get svc oficina-api -n $(NAMESPACE) -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'); \
+	echo "Swagger: http://$$HOST/api/docs"; \
+	echo "Saúde:   http://$$HOST/api/v1/health/ready"
 
 estado: ## Retrato do namespace
-	kubectl get all,pvc,configmap,secret,hpa -n $(NAMESPACE)
+	kubectl get all,configmap,secret,hpa -n $(NAMESPACE)
 
 logs: ## Segue os logs da API
 	kubectl logs -f -l app.kubernetes.io/name=oficina-api -n $(NAMESPACE) --max-log-requests=10
 
+carga: ## Sobe o gerador de carga para ver o HPA escalar
+	kubectl apply -f k8s/gerador-carga.yaml -n $(NAMESPACE)
+	@echo "Acompanhe com: watch kubectl get hpa,pods -n $(NAMESPACE)"
+
+sem-carga: ## Remove o gerador de carga
+	kubectl delete -f k8s/gerador-carga.yaml -n $(NAMESPACE) --ignore-not-found
+
 testes: ## Lint + unitários com cobertura + e2e
 	npm run lint && npm run test:cov && npm run test:e2e
-
-destruir: ## Remove a aplicação e a infraestrutura do cluster
-	kubectl delete -f k8s/ --ignore-not-found || true
-	cd infra && terraform destroy -input=false -auto-approve
