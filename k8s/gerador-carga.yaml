@@ -1,10 +1,10 @@
-# Só para a demonstração do HPA. Aplique, observe as réplicas subirem e remova:
-#   make carga / make sem-carga
+# Só para a demonstração do HPA. Aplique no namespace do ambiente, observe as
+# réplicas subirem e remova:
+#   make carga NAMESPACE=prod / make sem-carga NAMESPACE=prod
 apiVersion: v1
 kind: Pod
 metadata:
   name: gerador-carga
-  namespace: oficina
   labels:
     app.kubernetes.io/name: gerador-carga
 spec:

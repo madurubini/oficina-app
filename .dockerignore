@@ -19,7 +19,6 @@ coverage
 test
 docs
 k8s
-infra
 .github
 Makefile
 *.md

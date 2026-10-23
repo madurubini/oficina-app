@@ -1,12 +1,11 @@
-# Exige o metrics-server: minikube addons enable metrics-server
+# Exige o metrics-server, instalado no cluster como add-on do EKS (repo oficina-infra-k8s).
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: oficina-api
-  namespace: oficina
   labels:
     app.kubernetes.io/name: oficina-api
-    app.kubernetes.io/part-of: workshop-manager
+    app.kubernetes.io/part-of: oficina
 spec:
   scaleTargetRef:
     apiVersion: apps/v1

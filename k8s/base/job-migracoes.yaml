@@ -1,13 +1,14 @@
 # Migra o banco uma vez, antes da API subir. Fora do start da aplicação porque
 # as réplicas criadas pelo HPA migrariam o mesmo banco simultaneamente.
+# O schema (homolog ou prod) vem da DATABASE_URL do Secret; o Prisma o cria se
+# ainda não existir. Se o RDS ainda não aceita conexão, o backoffLimit tenta de novo.
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: migracoes
-  namespace: oficina
   labels:
     app.kubernetes.io/name: migracoes
-    app.kubernetes.io/part-of: workshop-manager
+    app.kubernetes.io/part-of: oficina
 spec:
   backoffLimit: 4
   ttlSecondsAfterFinished: 300
@@ -17,21 +18,9 @@ spec:
         app.kubernetes.io/name: migracoes
     spec:
       restartPolicy: Never
-      initContainers:
-        - name: aguardar-banco
-          image: postgres:16-alpine
-          command:
-            - sh
-            - -c
-            - |
-              until pg_isready -h oficina-db -p 5432; do
-                echo "Postgres ainda não responde; aguardando..."
-                sleep 2
-              done
       containers:
         - name: migracoes
-          image: oficina-api:local
-          imagePullPolicy: IfNotPresent
+          image: oficina-api
           command:
             - sh
             - -c
