@@ -7,7 +7,8 @@ Princípio do corte: **comando automático não é rota.** Tudo que é disparado
 ## Convenções
 
 - Base URL: `/api/v1` · JSON · IDs em UUID · datas ISO-8601.
-- JWT `Bearer` nas rotas **administrativas**. No **acompanhamento**: a consulta (`GET`) é pública pelo id da OS; **aprovar/recusar** exige o **token de acompanhamento** — um JWT assinado, com escopo da OS e validade, gerado no envio do orçamento e embutido no link (`Authorization: Bearer` ou `?token=`). O cliente aprova sem ter conta.
+- JWT `Bearer` nas rotas **administrativas**, emitido por `POST /auth/login` (operador). Token de cliente nessas rotas → **403**.
+- JWT `Bearer` do **cliente** em todo o **acompanhamento**: emitido pela Lambda `auth-cpf` (repo `oficina-lambda-auth`) depois de conferir que o CPF existe e o cliente está ativo. Formato: `{ sub: clienteId, papel: "CLIENTE" }`, assinado com o mesmo `JWT_SECRET`. O cliente só vê e responde as **próprias** OSs (outra OS → 403). Token de operador no acompanhamento → 401.
 - Erro padrão: `{ "erro": { "codigo", "mensagem", "detalhes" } }`.
 - Status: 200/201/204, 400 (validação), 401/403 (auth), 404, 409 (conflito), 422 (transição de status inválida).
 
@@ -19,8 +20,8 @@ banco. `detalhes` é sempre a chave presente: `null` quando não há o que detal
 | Código | HTTP | Quando acontece | `detalhes` |
 |---|---|---|---|
 | `VALIDACAO` | 400 | Formato de entrada inválido (DTO/query) ou regra do caso de uso (ex.: período com início posterior ao fim). | Lista de mensagens do validador, ou o objeto do erro de domínio. |
-| `NAO_AUTENTICADO` | 401 | Sem credencial, JWT inválido/expirado, token de acompanhamento ausente ou inválido. | `null`. |
-| `NAO_AUTORIZADO` | 403 | Autenticado, mas sem permissão: papel insuficiente (`@Papeis`) ou token de acompanhamento de **outra** OS. | Papéis exigidos, quando for o caso. |
+| `NAO_AUTENTICADO` | 401 | Sem credencial, JWT inválido/expirado, token do cliente ausente ou inválido. | `null`. |
+| `NAO_AUTORIZADO` | 403 | Autenticado, mas sem permissão: papel insuficiente (`@Papeis`), token de cliente em rota administrativa ou OS de **outro** cliente. | Papéis exigidos, quando for o caso. |
 | `NAO_ENCONTRADO` | 404 | Recurso inexistente ou inativo. | Identificador procurado. |
 | `CONFLITO` | 409 | Unicidade (documento, placa, código da peça) ou conflito de versão (optimistic lock). | Campo(s) em conflito. |
 | `TRANSICAO_INVALIDA` | 422 | Ação incompatível com o status atual da OS. | Status de origem e destino. |
@@ -117,10 +118,13 @@ Exemplo do diagnóstico (a rota que mais concentra):
 
 ## Acompanhamento e decisões do cliente (app)
 
+Todas exigem o **token do cliente** (login por CPF).
+
 | Método / Rota | O que faz |
 |---|---|
-| `GET /acompanhamento/{osId}` | Consulta **pública** (pelo id da OS): status, orçamentos (inicial + adicionais) e histórico. |
-| `POST /acompanhamento/{osId}/orcamentos/{orcamentoId}/resposta` | **Exige o token de acompanhamento da OS** (Bearer). Corpo `{ aprovado: bool, justificativa? }`. Vale para o orçamento **inicial** e os **adicionais** (identificados pelo `orcamentoId`). Inicial aprovado → Em execução (ou Aguardando peça, se alguma peça foi encomendada) + reserva/encomenda; inicial recusado → Cancelada. A OS sai de Aguardando peça para Em execução automaticamente quando as peças encomendadas dão entrada no estoque. Adicional aprovado → reserva/encomenda o trabalho extra; adicional recusado → segue só com o aprovado. O controller roteia para dois casos de uso (Aprovar / Recusar). |
+| `GET /acompanhamento` | Lista as OSs do cliente logado, da mais recente à mais antiga. Cada item traz o `id` usado nas rotas abaixo. |
+| `GET /acompanhamento/{osId}` | Status, orçamentos (inicial + adicionais) e histórico de uma OS **do cliente** (de outro → 403). |
+| `POST /acompanhamento/{osId}/orcamentos/{orcamentoId}/resposta` | Só para OS **do cliente**. Corpo `{ aprovado: bool, justificativa? }`. Vale para o orçamento **inicial** e os **adicionais** (identificados pelo `orcamentoId`). Inicial aprovado → Em execução (ou Aguardando peça, se alguma peça foi encomendada) + reserva/encomenda; inicial recusado → Cancelada. A OS sai de Aguardando peça para Em execução automaticamente quando as peças encomendadas dão entrada no estoque. Adicional aprovado → reserva/encomenda o trabalho extra; adicional recusado → segue só com o aprovado. O controller roteia para dois casos de uso (Aprovar / Recusar). |
 
 ---
 
@@ -138,7 +142,7 @@ Exemplo do diagnóstico (a rota que mais concentra):
 - 4 CRUDs administrativos (clientes, veículos, serviços, peças) — exigidos pelo enunciado.
 - 1 cadastro de usuário (`POST /usuarios`, GESTOR).
 - 10 rotas na OS (4 de leitura/criação — incluindo a fila — + 6 de ação).
-- 2 rotas de acompanhamento do cliente (consulta + resposta a orçamento por id).
+- 3 rotas de acompanhamento do cliente (lista + consulta + resposta a orçamento por id), com o token do login por CPF.
 - 1 auth + 1 relatório + 1 health.
 
 Os comandos automáticos (reservar, encomendar, baixar, gerar orçamento, mudar status, reenviar notificação) **não** aparecem como rota: vivem dentro das ações acima, disparados por política.

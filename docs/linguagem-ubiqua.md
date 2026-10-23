@@ -119,6 +119,8 @@ A OS carrega o ciclo de vida inteiro: abertura → diagnóstico → orçamento �
 |---|---|---|
 | Usuário administrativo | EN | Operador interno (recepcionista/mecânico/gestor) que acessa as APIs administrativas. |
 | Autenticação JWT | — | Token Bearer exigido nas rotas administrativas. |
+| Login por CPF | — | Entrada do cliente no aplicativo: a Lambda `auth-cpf` confere se o CPF pertence a um cliente ativo e devolve o token do cliente. |
+| Token do cliente | — | JWT `{ sub: clienteId, papel: CLIENTE }`. Dá acesso só às OSs daquele cliente, no acompanhamento; não abre rotas administrativas. |
 
 ---
 

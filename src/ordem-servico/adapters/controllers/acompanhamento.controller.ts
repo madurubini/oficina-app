@@ -9,7 +9,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { AcompanhamentoGuard } from '../../../identidade/adapters/guards/acompanhamento.guard';
+import { ClienteAtual } from '../../../identidade/adapters/decorators/cliente-atual.decorator';
+import {
+  ClienteAutenticado,
+  ClienteGuard,
+} from '../../../identidade/adapters/guards/cliente.guard';
 import { AprovarOrcamento } from '../../use-cases/aprovar-orcamento.usecase';
 import { ConsultarOrdemServico } from '../../use-cases/consultar-ordem-servico.usecase';
 import { RecusarOrcamento } from '../../use-cases/recusar-orcamento.usecase';
@@ -17,13 +21,14 @@ import { apresentarAcompanhamento } from '../presenters/ordem-servico.presenter'
 import { AcompanhamentoRespostaDto, RespostaOrcamentoDto } from '../dtos';
 
 /**
- * Acompanhamento do cliente (app). A CONSULTA (GET) é pública — o acesso é pelo
- * id da OS (o link enviado ao cliente). Já a RESPOSTA ao orçamento (aprovar /
- * recusar) exige o TOKEN DE ACOMPANHAMENTO daquela OS (assinado, com escopo e
- * validade — gerado no envio do orçamento e embutido no link). O cliente aprova
- * pelo app sem ter conta, e o token de uma OS não serve para outra.
+ * Acompanhamento do cliente (app). Todas as rotas exigem o TOKEN DO CLIENTE,
+ * emitido pelo login por CPF (Lambda `auth-cpf`). O cliente só enxerga e
+ * responde as próprias OSs: a posse é conferida no caso de uso, então o token
+ * de um cliente não abre a OS de outro (403).
  */
 @ApiTags('Acompanhamento do cliente')
+@ApiBearerAuth()
+@UseGuards(ClienteGuard)
 @Controller('acompanhamento')
 export class AcompanhamentoController {
   constructor(
@@ -32,27 +37,42 @@ export class AcompanhamentoController {
     private readonly consulta: ConsultarOrdemServico,
   ) {}
 
+  @Get()
+  @ApiOperation({ summary: 'Lista as OSs do cliente logado' })
+  async listar(
+    @ClienteAtual() cliente: ClienteAutenticado,
+  ): Promise<AcompanhamentoRespostaDto[]> {
+    const ordens = await this.consulta.listarDoCliente(cliente.id);
+    return ordens.map(apresentarAcompanhamento);
+  }
+
   @Get(':osId')
-  @ApiOperation({ summary: 'Consulta pública: status, orçamentos e histórico' })
+  @ApiOperation({
+    summary: 'Status, orçamentos e histórico de uma OS do cliente',
+  })
   async consultar(
     @Param('osId') osId: string,
+    @ClienteAtual() cliente: ClienteAutenticado,
   ): Promise<AcompanhamentoRespostaDto> {
-    return apresentarAcompanhamento(await this.consulta.buscar(osId));
+    return apresentarAcompanhamento(
+      await this.consulta.buscarDoCliente(osId, cliente.id),
+    );
   }
 
   @Post(':osId/orcamentos/:orcamentoId/resposta')
-  @UseGuards(AcompanhamentoGuard)
-  @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Cliente aprova ou recusa um orçamento via token de acompanhamento da OS (roteia para dois casos de uso)',
+      'Cliente aprova ou recusa um orçamento da própria OS (roteia para dois casos de uso)',
   })
   async responder(
     @Param('osId') osId: string,
     @Param('orcamentoId') orcamentoId: string,
     @Body() dto: RespostaOrcamentoDto,
+    @ClienteAtual() cliente: ClienteAutenticado,
   ): Promise<AcompanhamentoRespostaDto> {
+    // Confere a posse antes de mexer na OS.
+    await this.consulta.buscarDoCliente(osId, cliente.id);
     const ordem = dto.aprovado
       ? await this.aprovarOrcamento.executar({
           ordemId: osId,

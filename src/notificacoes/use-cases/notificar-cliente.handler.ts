@@ -8,39 +8,32 @@ import type {
   OrcamentoRecusado,
   VeiculoEntregue,
 } from '../../ordem-servico/entities/eventos';
-import {
-  ACOMPANHAMENTO_TOKEN,
-  AcompanhamentoToken,
-} from '../../identidade/use-cases/acompanhamento-token';
 import { NOTIFICADOR, Notificador } from './notificador';
 
 /**
  * Fan-out do event bus: `orcamento-aprovado` é tratado pelo Estoque (reserva)
  * e aqui (aviso ao cliente), sem um conhecer o outro.
  *
- * O link enviado carrega o token de acompanhamento da OS — é por ele que o
- * cliente aprova sem ter conta.
+ * O link leva à OS no aplicativo; para aprovar ou recusar, o cliente entra com
+ * o CPF. O link não carrega credencial nenhuma, então pode ser repassado.
  */
 @Injectable()
 export class NotificarCliente {
   constructor(
     @Inject(NOTIFICADOR)
     private readonly notificador: Notificador,
-    @Inject(ACOMPANHAMENTO_TOKEN)
-    private readonly tokens: AcompanhamentoToken,
   ) {}
 
   @OnEvent('ordem-servico.orcamento-enviado')
   async aoEnviar(evento: OrcamentoEnviado): Promise<void> {
     const adicional = (evento.tipo as string) === 'ADICIONAL';
-    const token = await this.tokens.gerar(evento.ordemId);
-    const link = `/acompanhamento/${evento.ordemId}?token=${token}`;
+    const link = `/acompanhamento/${evento.ordemId}`;
     await this.notificador.notificar({
       ordemId: evento.ordemId,
       tipo: adicional ? 'ORCAMENTO_ADICIONAL_ENVIADO' : 'ORCAMENTO_ENVIADO',
       mensagem: adicional
-        ? `Identificamos um reparo adicional na OS ${evento.numero}. Autorize ou recuse pelo aplicativo: ${link}`
-        : `Seu orçamento da OS ${evento.numero} está pronto. Aprove ou recuse pelo aplicativo: ${link}`,
+        ? `Identificamos um reparo adicional na OS ${evento.numero}. Entre no aplicativo com seu CPF para autorizar ou recusar: ${link}`
+        : `Seu orçamento da OS ${evento.numero} está pronto. Entre no aplicativo com seu CPF para aprovar ou recusar: ${link}`,
     });
   }
 
