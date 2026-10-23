@@ -1,0 +1,34 @@
+# Homologação: namespace homolog, schema homolog no RDS (via Secret criado pelo
+# pipeline) e menos réplicas, para caber ao lado de prod nos mesmos 2 nós.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: homolog
+
+resources:
+  - ../../base
+
+# O pipeline reescreve newName/newTag com o ECR e o SHA do commit.
+images:
+  - name: oficina-api
+    newName: oficina-api
+    newTag: local
+
+patches:
+  - target:
+      kind: Deployment
+      name: oficina-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: oficina-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 3

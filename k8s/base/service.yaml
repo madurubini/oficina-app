@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oficina-api
+  labels:
+    app.kubernetes.io/name: oficina-api
+    app.kubernetes.io/part-of: oficina
+spec:
+  # O EKS cria um Load Balancer da AWS nas subnets públicas (as que o repo
+  # oficina-infra-k8s marcou com kubernetes.io/role/elb) e devolve um endereço
+  # público. Cada ambiente ganha o seu.
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: oficina-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

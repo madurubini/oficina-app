@@ -5,7 +5,7 @@ cadastro de clientes/veículos, **Ordem de Serviço** (diagnóstico → orçamen
 entrega), controle de **estoque de peças** e acompanhamento do cliente por link público.
 
 **Stack:** TypeScript · NestJS 11 · PostgreSQL 16 + Prisma 5 · JWT · Swagger.
-**Infraestrutura:** Docker · Kubernetes (Minikube) · Terraform · GitHub Actions.
+**Infraestrutura:** Docker · AWS (EKS, ECR, RDS) · Kustomize · Terraform · GitHub Actions.
 
 ---
 
@@ -18,8 +18,7 @@ entrega), controle de **estoque de peças** e acompanhamento do cliente por link
 | Desenho da arquitetura — infraestrutura provisionada | [Componentes](#componentes) |
 | Desenho da arquitetura — fluxo de deploy | [Fluxo de deploy](#fluxo-de-deploy) |
 | Instruções de execução local | [Rodando localmente](#rodando-localmente) |
-| Instruções de deploy em Kubernetes | [Deploy no Kubernetes](#deploy-no-kubernetes) |
-| Instruções de provisionamento com Terraform | [Provisionamento com Terraform](#provisionamento-com-terraform) |
+| Instruções de deploy (Fase 3: EKS) | [Infraestrutura (Fase 3)](#infraestrutura-fase-3) |
 | Collection completa das APIs | [Collection das APIs](#collection-das-apis) |
 | Vídeo demonstrativo | [Vídeo demonstrativo](#vídeo-demonstrativo) |
 
@@ -433,319 +432,155 @@ O ciclo de vida da OS, o fluxo ponta a ponta e o desvio de peça em falta estão
 
 ---
 
-## Infraestrutura (Fase 2)
+## Infraestrutura (Fase 3)
 
-A Fase 2 evolui a aplicação para rodar em **infraestrutura escalável e provisionada por código**:
-containerização revisada, orquestração em Kubernetes, IaC com Terraform e pipeline de CI/CD.
-Tudo roda **localmente**, num cluster Minikube.
+Na Fase 3 a aplicação sai do Minikube e passa a rodar na **AWS**. A infraestrutura fica em
+repositórios próprios, e este repositório cuida só da aplicação e do seu deploy:
+
+| Repositório | Provisiona |
+|---|---|
+| `oficina-infra-k8s` | VPC, subnets públicas, cluster **EKS** `oficina-eks` (2 nós), **ECR** `oficina-app`, add-on metrics-server |
+| `oficina-infra-db` | **RDS** Postgres 16 `oficina-db`, acessível só de dentro da VPC |
+| **`oficina-app`** (este) | Imagem no ECR, namespaces `homolog` e `prod`, Secrets e manifestos da aplicação |
+| `oficina-lambda-auth` | API Gateway e Lambdas de autenticação por CPF |
+
+Ordem para subir: infra-k8s → infra-db → **oficina-app** → lambda-auth (para derrubar, a inversa).
 
 ### Componentes
 
 ```mermaid
 flowchart TB
-    subgraph cluster["Cluster Kubernetes (Minikube)"]
-        subgraph ns["namespace: oficina"]
-            svc["<b>Service</b> oficina-api<br/>NodePort 30080"]
+    usuario(["Cliente / Swagger"])
 
-            subgraph dep["Deployment oficina-api"]
-                p1["Pod API"]
-                p2["Pod API"]
-                pn["Pod API …"]
+    subgraph aws["AWS (us-east-1)"]
+        ecr[("<b>ECR</b> oficina-app<br/><i>imagem por commit</i>")]
+
+        subgraph eks["Cluster EKS oficina-eks"]
+            subgraph nsh["namespace: homolog"]
+                svch["<b>Service</b> LoadBalancer"]
+                deph["Deployment<br/>1 a 3 réplicas"]
             end
-
-            hpa["<b>HPA</b><br/>2 a 10 réplicas<br/>CPU 60% · memória 75%"]
-            job["<b>Job</b> migracoes<br/><i>prisma migrate deploy + seed</i>"]
-            cm["<b>ConfigMap</b><br/>PORT · NODE_ENV · JWT_EXPIRES_IN"]
-            sec["<b>Secrets</b><br/>DATABASE_URL · JWT_SECRET<br/>credenciais do Postgres"]
-
-            subgraph sts["StatefulSet oficina-db"]
-                pg["Pod Postgres 16"]
+            subgraph nsp["namespace: prod"]
+                svcp["<b>Service</b> LoadBalancer"]
+                depp["Deployment<br/>2 a 10 réplicas"]
             end
-            pvc[("<b>PVC</b> 1Gi<br/><i>dados persistentes</i>")]
+            ms["metrics-server<br/><i>add-on</i>"]
         end
-        ms["metrics-server<br/><i>addon</i>"]
+
+        lbh["Load Balancer homolog"]
+        lbp["Load Balancer prod"]
+
+        subgraph rds["RDS oficina-db"]
+            sh[("schema homolog")]
+            sp[("schema prod")]
+        end
     end
 
-    usuario(["Cliente / Swagger"]) --> svc --> dep
-    hpa -.->|"escala"| dep
-    ms -.->|"consumo de CPU/memória"| hpa
-    job -->|"cria as tabelas<br/>antes da API subir"| pg
-    dep --> pg
-    pg --- pvc
-    cm -.->|envFrom| dep
-    sec -.->|envFrom| dep
+    usuario --> lbh --> svch --> deph
+    usuario --> lbp --> svcp --> depp
+    deph --> sh
+    depp --> sp
+    ecr -.->|imagem| deph
+    ecr -.->|imagem| depp
+    ms -.->|"CPU/memória → HPA"| eks
 
     classDef app fill:#e3f2e8,stroke:#4a8a5f,color:#12301d
     classDef infra fill:#e8f0fe,stroke:#4a6fa5,color:#1a2b47
     classDef dado fill:#f4f1e8,stroke:#9a8c68,color:#3d3520
-    class dep,svc,p1,p2,pn app
-    class hpa,ms,job,cm,sec infra
-    class sts,pg,pvc dado
+    class deph,depp,svch,svcp app
+    class ecr,ms,lbh,lbp infra
+    class sh,sp dado
 ```
 
-### Quem provisiona o quê
+Cada namespace tem também o ConfigMap, o Secret `oficina-secrets`, o Job de migrations e o HPA.
 
-| | Ferramenta | Recursos |
-|---|---|---|
-| **Plataforma** | Terraform (`infra/`) | Namespace, Secrets, StatefulSet do Postgres + volume, Service do banco |
-| **Aplicação** | Manifestos YAML (`k8s/`) | Deployment, Service, ConfigMap, HPA, Job de migrations |
+### Manifestos: Kustomize
 
-O que tem **estado ou segredo** fica no Terraform (ele guarda o estado e injeta credenciais por
-variável, sem versioná-las); o que é **descartável e recriável** fica em YAML puro, mais direto de
-ler e aplicar. Detalhes de cada recurso em [`infra/README.md`](infra/README.md).
+```
+k8s/
+├── base/                    o que é igual nos dois ambientes
+│   ├── configmap.yaml
+│   ├── deployment.yaml      sondas, requests/limits, usuário não-root
+│   ├── service.yaml         type: LoadBalancer
+│   ├── hpa.yaml             2 a 10 réplicas (CPU 60% · memória 75%)
+│   └── job-migracoes.yaml   prisma migrate deploy + seed
+├── overlays/
+│   ├── homolog/             namespace homolog, 1 a 3 réplicas
+│   └── prod/                namespace prod, réplicas da base
+└── gerador-carga.yaml       demonstração do HPA
+```
+
+O **Kustomize** (embutido no `kubectl`) monta o YAML final juntando a `base/` com o overlay do
+ambiente. Assim os dois ambientes compartilham os mesmos arquivos, e as diferenças ficam visíveis
+num lugar só. Para ver o resultado sem aplicar: `kubectl kustomize k8s/overlays/homolog`.
 
 ### Fluxo de deploy
 
 ```mermaid
 flowchart LR
-    dev(["push na main"]) --> ci
+    pr(["PR para homolog ou main"]) --> q
+    push(["push em homolog ou main"]) --> q2
 
-    subgraph ci["GitHub Actions (runner hospedado)"]
-        direction TB
-        q["<b>1. Qualidade</b><br/>lint · build<br/>238 testes + cobertura 80%"]
-        img["<b>2. Imagem</b><br/>docker build<br/>artefato .tar"]
-        tf["<b>3. Terraform</b><br/>fmt · validate"]
-        dp["<b>4. Deploy</b><br/>Minikube efêmero no runner<br/>terraform apply → banco<br/>kubectl apply → aplicação<br/>smoke test"]
-        q --> img --> dp
-        q --> tf --> dp
-    end
+    q["<b>Build e testes</b><br/>lint · build · unitários + cobertura · e2e<br/><i>check obrigatório do PR</i>"]
 
-    subgraph local["Máquina local (demonstração)"]
+    subgraph dep["Deploy no EKS (só em push)"]
         direction TB
-        l1["make cluster"] --> l2["make infra<br/><i>terraform apply</i>"] --> l3["make imagem<br/><i>build no daemon do Minikube</i>"] --> l4["make manifestos<br/><i>Job → Deployment</i>"]
+        q2["Build e testes"] --> img["docker build<br/>push no ECR<br/><i>tag = SHA do commit</i>"]
+        img --> sec["namespace + Secret<br/><i>DATABASE_URL montada com<br/>o endereço lido do RDS</i>"]
+        sec --> ap["kubectl apply -k<br/>overlay do ambiente"]
+        ap --> mig["Job de migrations<br/>rollout da API"]
+        mig --> smoke["smoke test pelo<br/>Load Balancer"]
     end
 
     classDef ciC fill:#e8f0fe,stroke:#4a6fa5,color:#1a2b47
-    classDef localC fill:#e3f2e8,stroke:#4a8a5f,color:#12301d
-    class q,img,tf,dp ciC
-    class l1,l2,l3,l4 localC
+    class q,q2,img,sec,ap,mig,smoke ciC
 ```
 
-A pipeline não alcança o cluster da máquina local — um runner hospedado não tem rota até ele. Por
-isso o job de deploy **sobe seu próprio Minikube dentro do runner**: o deploy é real e verificado a
-cada push (migrations, rollout e smoke test com login), sem depender de nenhuma máquina ligada.
+`homolog` faz deploy no namespace `homolog` (schema `homolog` do RDS); `main`, no `prod` (schema
+`prod`). O fluxo de branches é `feat/*` → PR → `homolog` → PR → `main`, e o check
+**Build e testes** precisa estar verde para o merge. A URL de cada ambiente sai no resumo da
+execução do workflow.
 
-### Pré-requisitos
+**Secrets do repositório** (Settings → Secrets and variables → Actions):
 
-```bash
-# kubectl
-curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-install -m 0755 kubectl ~/.local/bin/kubectl && rm kubectl
-
-# minikube
-curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-install -m 0755 minikube-linux-amd64 ~/.local/bin/minikube && rm minikube-linux-amd64
-
-# terraform
-curl -LO https://releases.hashicorp.com/terraform/1.15.9/terraform_1.15.9_linux_amd64.zip
-unzip terraform_1.15.9_linux_amd64.zip && install -m 0755 terraform ~/.local/bin/terraform
-```
-
-Docker também é necessário — é o "motor" onde o Minikube cria o nó do cluster.
-
-### Deploy no Kubernetes
-
-Com o Makefile, três comandos:
-
-```bash
-make cluster      # minikube start + addon metrics-server
-make deploy       # terraform apply → build da imagem → manifestos → rollout
-make url          # imprime a URL do Swagger e da sonda de saúde
-```
-
-Passo a passo, com o que verificar em cada etapa:
-
-**1. Cluster.** O `metrics-server` é quem mede CPU e memória dos pods — sem ele o HPA
-não tem como decidir se deve escalar.
-
-```bash
-minikube start --driver=docker --cpus=4 --memory=6144
-minikube addons enable metrics-server
-
-kubectl get nodes                 # o nó "minikube" deve aparecer como Ready
-```
-
-**2. Plataforma (Terraform).** Cria o namespace, os Secrets e o Postgres com seu volume.
-O `apply` só termina quando o banco aceita conexão.
-
-```bash
-cd infra
-terraform init                    # baixa o provider; roda uma vez
-terraform plan                    # confira: "Plan: 5 to add"
-terraform apply                   # confirme com "yes"
-cd ..
-
-kubectl get statefulset,pvc,secret -n oficina
-# oficina-db 1/1 · PVC "Bound" · secrets oficina-secrets e oficina-db-credenciais
-```
-
-**3. Imagem.** Construída **dentro do daemon do Minikube**, e não no Docker do host: assim
-o cluster a enxerga sem precisar de um registry.
-
-```bash
-eval $(minikube docker-env) && docker build -t oficina-api:local .
-
-minikube image ls | grep oficina  # docker.io/library/oficina-api:local
-```
-
-> ⚠️ Não use `minikube image load` com a tag fixa `:local`. Se a tag já existir no cluster,
-> a imagem antiga permanece em cache e a API continua servindo a versão anterior — foi
-> exatamente esse o sintoma que apareceu aqui (probes respondendo 404 numa rota recém-criada).
-
-**4. Aplicação.** O Job migra o banco; o Deployment sobe a API.
-
-```bash
-kubectl apply -f k8s/configmap.yaml -f k8s/job-migracoes.yaml \
-              -f k8s/deployment.yaml -f k8s/service.yaml -f k8s/hpa.yaml
-
-kubectl wait --for=condition=complete job/migracoes -n oficina --timeout=300s
-kubectl logs job/migracoes -n oficina | tail -3   # "All migrations have been successfully applied"
-
-kubectl rollout status deployment/oficina-api -n oficina
-kubectl get pods -n oficina                       # 2 pods da API + oficina-db-0, todos Running
-```
-
-**5. Acessar e conferir.**
-
-```bash
-URL="http://$(minikube ip):30080"
-echo "$URL/api/docs"
-
-curl -s "$URL/api/v1/health/ready"                # {"status":"ok", database "up"}
-curl -s -X POST "$URL/api/v1/auth/login" \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"gestor","senha":"gestor123"}'  # devolve o accessToken
-```
-
-O usuário `gestor` existe porque o Job rodou o seed junto com as migrations.
-
-**Para recomeçar do zero** (apaga o banco, inclusive os dados):
-
-```bash
-make destruir     # kubectl delete + terraform destroy
-```
+| Secret | Para quê |
+|---|---|
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Sessão do Learner Lab (mudam a cada sessão) |
+| `DB_PASSWORD` | Senha do RDS, a mesma do repo `oficina-infra-db` |
+| `JWT_SECRET` | Assinatura dos tokens; a mesma das Lambdas |
 
 ### Secrets: de onde vem cada credencial
 
-Um Secret do Kubernetes é um objeto que guarda valores sensíveis e os entrega ao container
-como variável de ambiente. Os valores ficam em **base64, que é codificação e não
-criptografia** — a proteção real vem de quem tem permissão de lê-los no cluster, não do
-encoding. O ganho concreto aqui é outro: **credencial nenhuma fica escrita em arquivo
-versionado**.
-
-> **Por que o Secret não é um YAML aplicado em `k8s/`.** Um Secret em YAML versionado
-> carregaria a senha do banco e o segredo do JWT em texto no repositório — exatamente o que
-> um Secret existe para evitar. Por isso ele é **provisionado como código, pelo Terraform**,
-> que recebe os valores por variável (`sensitive`) e os injeta no cluster. O arquivo
-> [`k8s/secret.example.yaml`](k8s/secret.example.yaml) documenta o formato esperado pelo
-> Deployment, e o `envFrom: secretRef` em [`k8s/deployment.yaml`](k8s/deployment.yaml)
-> mostra o consumo. É a mesma prática de `.env.example`: versiona-se o formato, nunca o valor.
-
-Existem dois Secrets, com públicos diferentes:
-
-| Secret | Chaves | Quem consome |
-|---|---|---|
-| `oficina-db-credenciais` | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | O container do Postgres, que usa esses valores para criar o banco no primeiro boot |
-| `oficina-secrets` | `DATABASE_URL`, `JWT_SECRET` | A API e o Job de migrations |
-
-O caminho que um valor percorre:
+Nenhuma credencial fica em arquivo versionado. O Secret `oficina-secrets` (chaves `DATABASE_URL`
+e `JWT_SECRET`) é **criado pelo pipeline** a cada deploy:
 
 ```mermaid
 flowchart LR
-    v["variável do Terraform<br/><i>banco_senha</i>"] --> l["locals.database_url<br/><i>monta a string de conexão</i>"]
-    l --> s["Secret oficina-secrets<br/><i>no cluster</i>"]
+    gh["Secrets do GitHub<br/><i>DB_PASSWORD · JWT_SECRET</i>"] --> wf["workflow<br/><i>monta a DATABASE_URL</i>"]
+    rds["aws rds describe-db-instances<br/><i>endereço · usuário · banco</i>"] --> wf
+    wf -->|kubectl apply| s["Secret oficina-secrets<br/><i>no namespace</i>"]
     s -->|envFrom| p["Pod da API<br/><i>process.env.DATABASE_URL</i>"]
 
-    classDef tf fill:#e8f0fe,stroke:#4a6fa5,color:#1a2b47
+    classDef ext fill:#e8f0fe,stroke:#4a6fa5,color:#1a2b47
     classDef k8s fill:#e3f2e8,stroke:#4a8a5f,color:#12301d
-    class v,l tf
+    class gh,rds,wf ext
     class s,p k8s
 ```
 
-1. **O valor entra como variável do Terraform** (`infra/variables.tf`), marcada `sensitive`
-   para não ser impressa no `plan`/`apply`.
-2. **O Terraform monta a `DATABASE_URL`** em `infra/locals.tf`, juntando usuário, senha, host
-   e banco — por isso a senha aparece uma vez só, na variável.
-3. **O Terraform cria o Secret** (`kubernetes_secret.aplicacao`, em `infra/main.tf`).
-4. **O Deployment consome com `envFrom`** (`k8s/deployment.yaml`): todas as chaves do Secret
-   viram variáveis de ambiente do container.
-5. **A aplicação lê `process.env.DATABASE_URL`** normalmente, sem saber que veio de um Secret.
+O schema da `DATABASE_URL` é o nome do namespace (`?schema=homolog` ou `?schema=prod`), e é isso
+que separa os dados dos dois ambientes no mesmo RDS. O Prisma cria o schema na primeira migration.
 
-Por isso `k8s/secret.example.yaml` existe mas **não é aplicado**: ele documenta o formato
-esperado. O Secret real nasce do Terraform, e nenhum valor de verdade entra no repositório.
+### Acompanhando o ambiente
 
-Para trocar as credenciais:
+Com as credenciais do Learner Lab em `~/.aws/credentials`:
 
 ```bash
-cd infra
-cp terraform.tfvars.example terraform.tfvars   # não é versionado (.gitignore)
-# edite banco_senha e jwt_secret
-terraform apply
-kubectl rollout restart deployment/oficina-api -n oficina   # o pod relê as variáveis ao subir
+make kubeconfig              # aponta o kubectl para o oficina-eks
+make url                     # Swagger e health de homolog
+make url NAMESPACE=prod      # ... e de prod
+make estado NAMESPACE=prod   # pods, service, HPA, secrets
+make logs                    # logs da API em homolog
 ```
-
-Para inspecionar o que está no cluster:
-
-```bash
-kubectl get secret oficina-secrets -n oficina -o jsonpath='{.data.JWT_SECRET}' | base64 -d
-terraform -chdir=infra output -raw database_url
-```
-
-Na pipeline, os mesmos valores chegam por **secrets do GitHub Actions**
-(`secrets.BANCO_SENHA` e `secrets.JWT_SECRET`), passados como `-var` no `terraform apply`.
-Se não estiverem configurados no repositório, o workflow cai para valores de teste — o
-cluster do CI é descartável e some ao fim da execução.
-
-> Em produção isto seria diferente: o Secret viria de um gerenciador externo (AWS Secrets
-> Manager, Vault) via External Secrets Operator, e o `tfstate` — que guarda os valores em
-> texto puro — ficaria num backend remoto com criptografia e controle de acesso, não em disco.
-
-### Provisionamento com Terraform
-
-O `infra/` provisiona a **plataforma**: namespace, Secrets e o banco de dados. É o passo 2 do
-deploy acima, detalhado — os recursos criados estão documentados em
-[`infra/README.md`](infra/README.md).
-
-```bash
-cd infra
-
-# 1. Baixa o provider e prepara o backend local. Roda uma vez.
-terraform init
-
-# 2. Opcional: personalize senha, tamanho do volume, namespace.
-cp terraform.tfvars.example terraform.tfvars     # não é versionado
-$EDITOR terraform.tfvars
-
-# 3. Mostra o que será criado, sem criar nada.
-terraform plan                                    # "Plan: 5 to add"
-
-# 4. Cria. Só termina quando o Postgres aceita conexão (wait_for_rollout).
-terraform apply
-
-# 5. Consulta as saídas.
-terraform output
-terraform output -raw database_url                # valores sensíveis exigem -raw
-```
-
-O que é criado:
-
-| Recurso | Nome | Papel |
-|---|---|---|
-| `kubernetes_namespace` | `oficina` | Isola os objetos da aplicação no cluster |
-| `kubernetes_secret` | `oficina-secrets` | `DATABASE_URL` e `JWT_SECRET` para a API |
-| `kubernetes_secret` | `oficina-db-credenciais` | Usuário, senha e banco para o Postgres |
-| `kubernetes_stateful_set` | `oficina-db` | Postgres 16, com volume que sobrevive ao pod |
-| `kubernetes_service` | `oficina-db` | Service headless: publica o banco no DNS interno |
-
-Para remover:
-
-```bash
-cd infra && terraform destroy
-```
-
-> ⚠️ O `destroy` apaga o volume e, com ele, **os dados do banco**.
-
----
 
 ### Escalabilidade automática
 
@@ -753,46 +588,46 @@ Em dois terminais:
 
 ```bash
 # terminal 1 — acompanha o HPA e as réplicas ao vivo
-watch -n 2 kubectl get hpa,pods -n oficina
+watch -n 2 kubectl get hpa,pods -n prod
 
 # terminal 2 — dispara a carga e, depois, remove
-make carga
-make sem-carga
+make carga NAMESPACE=prod
+make sem-carga NAMESPACE=prod
 ```
 
 Para ver o HPA registrando a decisão:
 
 ```bash
-kubectl describe hpa oficina-api -n oficina | tail -8
+kubectl describe hpa oficina-api -n prod | tail -8
 # Normal  SuccessfulRescale  ...  New size: 5; reason: cpu resource utilization above target
 ```
 
-Comportamento observado: com carga, o consumo passa de 60% do `requests.cpu` e o HPA vai de
-**2 → 5 réplicas** em cerca de 2 minutos; sem carga, aguarda 2 minutos de calmaria (janela de
-estabilização) e volta a 2. O `scaleDown` é deliberadamente mais lento que o `scaleUp` para o
-número de réplicas não ficar oscilando a cada pico curto.
+Com carga, o consumo passa de 60% do `requests.cpu` e o HPA sobe réplicas; sem carga, aguarda
+2 minutos de calmaria (janela de estabilização) e volta ao mínimo. O `scaleDown` é mais lento que
+o `scaleUp` para o número de réplicas não oscilar a cada pico curto.
 
 ### Decisões de infraestrutura
 
-**Minikube como cluster local.** Um cluster de um nó, criado dentro do Docker, que sobe e é
-destruído por comando. A alternativa era um cluster gerenciado na nuvem (EKS): mais próximo de
-produção, mas com custo e dependência de credenciais para qualquer pessoa reproduzir o ambiente.
-kind e k3d são mais leves, porém exigiriam instalar o `metrics-server` à mão — no Minikube ele é
-um addon.
+**Dois ambientes no mesmo cluster e no mesmo banco.** `homolog` e `prod` são namespaces do mesmo
+EKS e schemas do mesmo RDS. Separam objetos, Secrets e dados sem dobrar o custo, o que pesa no
+saldo do Learner Lab. O preço é que os ambientes dividem nós e instância de banco: uma carga
+pesada em homolog pode afetar prod.
 
-**Terraform provisiona a plataforma; YAML descreve a aplicação.** O critério da divisão é *estado
-e segredo*: o que precisa sobreviver (o volume do banco) e o que não pode ser versionado
-(credenciais) fica no Terraform, que mantém estado e recebe valores por variável; o resto, que é
-descartável e recriável, fica em YAML — mais direto de ler, aplicar e revisar. A alternativa,
-Terraform aplicando também os manifestos (`kubernetes_manifest`), reduziria tudo a um comando,
-mas transformaria o Terraform em invólucro do `kubectl` e tornaria o estado frágil.
+**Kustomize em vez de Helm.** Os dois ambientes diferem em pouco (namespace, imagem, réplicas).
+O Kustomize resolve isso com patches sobre YAML puro e já vem no `kubectl`. O Helm traria templates
+e um gerenciador de releases que este tamanho de projeto não precisa.
 
-**Postgres em StatefulSet, migrations em Job.** Banco tem estado, e o StatefulSet é o que dá ao
-pod um nome estável e um volume próprio que **não** é apagado quando ele morre — um Deployment
-trataria o banco como peça descartável. As migrations saíram do start da API e viraram um Job,
-que roda uma vez até concluir: com o HPA criando réplicas sob demanda, mantê-las no start faria
-várias réplicas migrarem o mesmo banco ao mesmo tempo. O `docker-entrypoint.sh` continua
-existindo, mas só para o Compose, onde há uma instância só.
+**Imagem com a tag do commit.** Cada deploy publica `oficina-app:<sha>` no ECR. Uma tag fixa
+(`latest`) não mudaria o Deployment, e o Kubernetes não trocaria os pods. Com o SHA, o rollout
+sempre acontece e dá para saber exatamente qual commit está no ar.
+
+**Secret criado pelo pipeline.** A senha do banco e o segredo do JWT ficam só nos Secrets do
+GitHub. O endereço do banco é lido do próprio RDS no momento do deploy, então nada é copiado à mão
+de um repositório para outro.
+
+**Service do tipo LoadBalancer.** O EKS cria um Load Balancer da AWS nas subnets públicas que o
+repo `oficina-infra-k8s` marcou. É o caminho mais curto para ter uma URL pública por ambiente; o
+API Gateway da Etapa de autenticação aponta para ela.
 
 **Liveness sem banco, readiness com banco.** As duas sondas respondem a perguntas diferentes: a
 liveness decide se o pod é **reiniciado**; a readiness, se ele **recebe tráfego**. Se ambas
@@ -800,33 +635,26 @@ checassem o banco, uma instabilidade do Postgres derrubaria em cascata réplicas
 quando o correto é apenas tirá-las do balanceamento até o banco voltar. A `startupProbe`
 completa o arranjo, dando ~60s de tolerância no boot sem afrouxar a liveness depois.
 
-**Pipeline em runner hospedado, com cluster efêmero.** Um runner hospedado não tem rota até um
-cluster local, então o job de deploy sobe o seu próprio Minikube: o deploy é verificado de
-verdade a cada push — migrations aplicadas, rollout concluído, login funcionando — sem depender
-de nenhuma máquina ligada. A alternativa era um runner *self-hosted*, que implantaria no cluster
-real e unificaria pipeline e demonstração, ao custo de manter o runner registrado e a máquina
-disponível.
-
-Decisões menores, pelo mesmo raciocínio:
+**Migrations em Job.** Com o HPA criando réplicas sob demanda, migrar no start da API faria várias
+réplicas migrarem o mesmo banco ao mesmo tempo. O Job roda uma vez por deploy, até concluir. O
+`docker-entrypoint.sh` continua existindo, mas só para o Compose, onde há uma instância só.
 
 | Decisão | Motivo |
 |---|---|
 | **`requests` declarados** | O HPA calcula a utilização como percentual do `requests` — sem ele, o autoscaler fica em `<unknown>` e nunca escala |
 | **Usuário não-root** (uid 1000) | Reduz o impacto de uma eventual execução de código no container; o `runAsNonRoot` exige uid **numérico**, então declarar `USER node` no Dockerfile não basta |
-| **Secrets no Terraform** | Mantém credencial fora do repositório: o valor vem de variável, não de YAML versionado |
-| **`imagePullPolicy: IfNotPresent`** | A imagem é carregada no cluster, não vem de registry; com `Always` o Kubernetes tentaria baixá-la e falharia |
-| **Build no daemon do Minikube** | Com uma tag fixa, `minikube image load` mantém a imagem antiga em cache e o cluster segue servindo a versão anterior |
+| **metrics-server como add-on do EKS** | O EKS não traz o metrics-server; sem ele o HPA não tem métrica para decidir. Como add-on, ele nasce com o cluster no repo de infraestrutura |
 
 ## Collection das APIs
 
 A collection completa é o **Swagger** publicado pela própria aplicação — gerado a partir dos
 decoradores nos controllers, então nunca fica defasado em relação ao código.
 
-| | Local | Kubernetes |
+| | Local | EKS (`make url` mostra o endereço) |
 |---|---|---|
-| Swagger UI | http://localhost:3000/api/docs | `http://$(minikube ip):30080/api/docs` |
-| OpenAPI JSON | http://localhost:3000/api/docs-json | `http://$(minikube ip):30080/api/docs-json` |
-| Health check | http://localhost:3000/api/v1/health | `http://$(minikube ip):30080/api/v1/health` |
+| Swagger UI | http://localhost:3000/api/docs | `http://<load-balancer>/api/docs` |
+| OpenAPI JSON | http://localhost:3000/api/docs-json | `http://<load-balancer>/api/docs-json` |
+| Health check | http://localhost:3000/api/v1/health | `http://<load-balancer>/api/v1/health` |
 
 Pelo Swagger dá para autenticar e disparar as chamadas sem sair do navegador:
 
@@ -871,6 +699,6 @@ Demonstra, no ambiente em execução:
 | [`docs/linguagem-ubiqua.md`](docs/linguagem-ubiqua.md) | Vocabulário do domínio (Event Storming). |
 | [`docs/schema.prisma`](docs/schema.prisma) | Cópia documental do schema de dados. |
 | [`docs/adr/`](docs/adr) | Decisões da Fase 1 (ex.: escolha do banco). |
-| [`infra/README.md`](infra/README.md) | Recursos provisionados pelo Terraform e como aplicá-los. |
+| [`docs/banco-de-dados.md`](docs/banco-de-dados.md) | Justificativa do banco e diagrama ER. |
 | [`k8s/`](k8s) | Manifestos da aplicação, comentados recurso a recurso. |
 | [`docs/relatorio-vulnerabilidades.md`](docs/relatorio-vulnerabilidades.md) | Análise de segurança do MVP. |
