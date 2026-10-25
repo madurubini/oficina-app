@@ -7,10 +7,7 @@ import { AppModule } from '../src/app.module';
 import { FiltroExcecaoGlobal } from '../src/compartilhado/erros/filtro-excecao-global';
 import { traduzirErroPrisma } from '../src/compartilhado/infraestrutura/prisma/erros-prisma';
 import { PrismaService } from '../src/compartilhado/infraestrutura/prisma/prisma.service';
-import {
-  ACOMPANHAMENTO_TOKEN,
-  AcompanhamentoToken,
-} from '../src/identidade/use-cases/acompanhamento-token';
+import { JwtService } from '@nestjs/jwt';
 
 /**
  * Sobe o AppModule contra um Postgres real e percorre o ciclo por HTTP, sem
@@ -33,6 +30,7 @@ const SERVICO_ID = '11111111-1111-4111-8111-111111111111';
 const PECA_ID = '33333333-3333-4333-8333-333333333333';
 // Peça sem saldo: força o diagnóstico a cotar (EM_COTACAO) e a OS a Aguardando peça.
 const PECA_ESCASSA_ID = '44444444-4444-4444-8444-444444444444';
+const CLIENTE_DESCONHECIDO = '00000000-0000-4000-8000-000000000000';
 
 describe('Fluxo da OS (e2e — integração com Postgres)', () => {
   let app: INestApplication;
@@ -98,6 +96,11 @@ describe('Fluxo da OS (e2e — integração com Postgres)', () => {
   afterAll(async () => {
     await app?.close();
   });
+
+  /** O mesmo token que a Lambda auth-cpf emite depois de conferir o CPF. */
+  function tokenDoCliente(clienteId: string): Promise<string> {
+    return app.get(JwtService).signAsync({ sub: clienteId, papel: 'CLIENTE' });
+  }
 
   it('percorre o ciclo completo da OS e movimenta o estoque', async () => {
     const http = request(app.getHttpServer());
@@ -165,9 +168,8 @@ describe('Fluxo da OS (e2e — integração com Postgres)', () => {
     expect(osComItens.body.pecas).toHaveLength(1);
     expect(osComItens.body.pecas[0].pecaId).toBe(PECA_ID);
 
-    // 5. Cliente aprova via TOKEN DE ACOMPANHAMENTO (sem login de operador)
-    const acomp = app.get<AcompanhamentoToken>(ACOMPANHAMENTO_TOKEN);
-    const tokenCliente = await acomp.gerar(osId);
+    // 5. Cliente aprova com o token do login por CPF (sem login de operador)
+    const tokenCliente = await tokenDoCliente(cli.body.id);
     const aprov = await http
       .post(`${base}/acompanhamento/${osId}/orcamentos/${orcamentoId}/resposta`)
       .set({ Authorization: `Bearer ${tokenCliente}` })
@@ -263,9 +265,8 @@ describe('Fluxo da OS (e2e — integração com Postgres)', () => {
     );
     expect(pecaOrcada.situacao).toBe('EM_COTACAO');
 
-    // Aprovar (token de acompanhamento)
-    const acomp = app.get<AcompanhamentoToken>(ACOMPANHAMENTO_TOKEN);
-    const tokenCliente = await acomp.gerar(osId);
+    // Aprovar (token do cliente)
+    const tokenCliente = await tokenDoCliente(cli.body.id);
     const aprov = await http
       .post(`${base}/acompanhamento/${osId}/orcamentos/${orcamentoId}/resposta`)
       .set({ Authorization: `Bearer ${tokenCliente}` })
@@ -302,6 +303,7 @@ describe('Fluxo da OS (e2e — integração com Postgres)', () => {
     // A OS retomou sozinha para Em execução
     const acompOS = await http
       .get(`${base}/acompanhamento/${osId}`)
+      .set({ Authorization: `Bearer ${tokenCliente}` })
       .expect(200);
     expect(acompOS.body.status).toBe('Em execução');
 
@@ -382,7 +384,7 @@ describe('Fluxo da OS (e2e — integração com Postgres)', () => {
     }
   }, 30000);
 
-  it('rejeita aprovar com token de acompanhamento de OUTRA OS (anti-IDOR)', async () => {
+  it('cliente só enxerga e responde as próprias OSs; token de cliente não abre rota administrativa', async () => {
     const http = request(app.getHttpServer());
     const base = '/api/v1';
     const login = await http
@@ -420,18 +422,53 @@ describe('Fluxo da OS (e2e — integração com Postgres)', () => {
       .send({ servicos: [{ servicoId: SERVICO_ID, quantidade: 1 }] })
       .expect(200);
 
-    // Token de OUTRA OS (id aleatório) → 403
-    const acomp = app.get<AcompanhamentoToken>(ACOMPANHAMENTO_TOKEN);
-    const tokenDeOutraOS = await acomp.gerar(
-      '00000000-0000-4000-8000-000000000000',
-    );
+    const dono = {
+      Authorization: `Bearer ${await tokenDoCliente(cli.body.id)}`,
+    };
+    const outro = {
+      Authorization: `Bearer ${await tokenDoCliente(CLIENTE_DESCONHECIDO)}`,
+    };
+    const resposta = `${base}/acompanhamento/${os.body.id}/orcamentos/${diag.body.orcamento.id}/resposta`;
+
+    // Sem token → 401
+    await http.get(`${base}/acompanhamento`).expect(401);
+    await http.get(`${base}/acompanhamento/${os.body.id}`).expect(401);
+
+    // O dono lista as próprias OSs (com o id para navegar) e abre a OS
+    const lista = await http
+      .get(`${base}/acompanhamento`)
+      .set(dono)
+      .expect(200);
+    expect(lista.body.map((o: { id: string }) => o.id)).toContain(os.body.id);
     await http
-      .post(
-        `${base}/acompanhamento/${os.body.id}/orcamentos/${diag.body.orcamento.id}/resposta`,
-      )
-      .set({ Authorization: `Bearer ${tokenDeOutraOS}` })
-      .send({ aprovado: true })
+      .get(`${base}/acompanhamento/${os.body.id}`)
+      .set(dono)
+      .expect(200);
+
+    // Token de OUTRO cliente → não vê a OS na lista, e abrir/responder é 403
+    const listaOutro = await http
+      .get(`${base}/acompanhamento`)
+      .set(outro)
+      .expect(200);
+    expect(listaOutro.body).toEqual([]);
+    await http
+      .get(`${base}/acompanhamento/${os.body.id}`)
+      .set(outro)
       .expect(403);
+    await http.post(resposta).set(outro).send({ aprovado: true }).expect(403);
+
+    // Token de cliente em rota administrativa → 403 (mesmo segredo, papel errado)
+    await http.get(`${base}/clientes`).set(dono).expect(403);
+    // Token de operador nas rotas do cliente → 401 (não é token de cliente)
+    await http.get(`${base}/acompanhamento`).set(auth).expect(401);
+
+    // O dono responde normalmente
+    const aprov = await http
+      .post(resposta)
+      .set(dono)
+      .send({ aprovado: true })
+      .expect(200);
+    expect(aprov.body.status).toBe('Em execução');
   }, 30000);
 
   it('gestor corrige o status pela rota administrativa, dentro da máquina de estados', async () => {

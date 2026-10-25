@@ -2,7 +2,8 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { Papel } from '../../entities/usuario';
+import { ErroNaoAutorizado } from '../../../compartilhado/erros/erros-dominio';
+import { PAPEIS, Papel } from '../../entities/usuario';
 
 export interface UsuarioAutenticado {
   id: string;
@@ -19,6 +20,11 @@ interface PayloadJwt {
 /**
  * Valida o Bearer token nas rotas administrativas. O retorno vira
  * `request.user`, acessível via decorator `@UsuarioAtual()`.
+ *
+ * O token do cliente (login por CPF) é assinado com o mesmo segredo, então a
+ * assinatura sozinha não basta: só passa quem tem papel de operador. Sem essa
+ * conferência, um cliente logado leria as rotas sem `@Papeis` (ex.: listar
+ * clientes).
  */
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -37,6 +43,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(payload: PayloadJwt): Promise<UsuarioAutenticado> {
     if (!payload?.sub) {
       throw new UnauthorizedException('Token inválido.');
+    }
+    if (!PAPEIS.includes(payload.papel)) {
+      throw new ErroNaoAutorizado(
+        'Token de cliente não acessa rotas administrativas.',
+      );
     }
     return {
       id: payload.sub,

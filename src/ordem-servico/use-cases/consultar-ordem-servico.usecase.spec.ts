@@ -1,4 +1,7 @@
-import { ErroNaoEncontrado } from '../../compartilhado/erros/erros-dominio';
+import {
+  ErroNaoAutorizado,
+  ErroNaoEncontrado,
+} from '../../compartilhado/erros/erros-dominio';
 import { OrdemServico } from '../entities/ordem-servico';
 import { StatusOS } from '../entities/status-os';
 import { ConsultarOrdemServico } from './consultar-ordem-servico.usecase';
@@ -49,6 +52,36 @@ describe('ConsultarOrdemServico', () => {
     it('lança ErroNaoEncontrado quando não existe', async () => {
       ordens.buscarPorId.mockResolvedValue(null);
       await expect(usecase.buscar('x')).rejects.toBeInstanceOf(
+        ErroNaoEncontrado,
+      );
+    });
+  });
+
+  describe('do cliente (acompanhamento)', () => {
+    it('lista só as OSs do cliente, filtrando no repositório', async () => {
+      ordens.listar.mockResolvedValue([]);
+      await usecase.listarDoCliente('c1');
+      expect(ordens.listar).toHaveBeenCalledWith({ clienteId: 'c1' });
+    });
+
+    it('devolve a OS quando ela é do cliente', async () => {
+      const ordem = os('os-1', StatusOS.RECEBIDA, new Date());
+      ordens.buscarPorId.mockResolvedValue(ordem);
+      await expect(usecase.buscarDoCliente('os-1', 'c1')).resolves.toBe(ordem);
+    });
+
+    it('lança ErroNaoAutorizado quando a OS é de outro cliente (anti-IDOR)', async () => {
+      ordens.buscarPorId.mockResolvedValue(
+        os('os-1', StatusOS.RECEBIDA, new Date()),
+      );
+      await expect(
+        usecase.buscarDoCliente('os-1', 'outro-cliente'),
+      ).rejects.toBeInstanceOf(ErroNaoAutorizado);
+    });
+
+    it('lança ErroNaoEncontrado quando a OS não existe', async () => {
+      ordens.buscarPorId.mockResolvedValue(null);
+      await expect(usecase.buscarDoCliente('x', 'c1')).rejects.toBeInstanceOf(
         ErroNaoEncontrado,
       );
     });

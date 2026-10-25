@@ -72,11 +72,12 @@ export function apresentarOrdemServico(
   };
 }
 
-/** Visão pública do cliente (acompanhamento): sem dados internos. */
+/** Visão do cliente (acompanhamento): sem dados internos. */
 export function apresentarAcompanhamento(
   ordem: OrdemServico,
 ): AcompanhamentoRespostaDto {
   return {
+    id: ordem.id,
     numero: ordem.numero,
     problemaRelatado: ordem.problemaRelatado,
     status: ROTULO_STATUS[ordem.status],

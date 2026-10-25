@@ -2,7 +2,7 @@
 
 Back-end do Sistema de Atendimento e Execução de Serviços de uma oficina mecânica:
 cadastro de clientes/veículos, **Ordem de Serviço** (diagnóstico → orçamento → execução →
-entrega), controle de **estoque de peças** e acompanhamento do cliente por link público.
+entrega), controle de **estoque de peças** e acompanhamento do cliente com login por CPF.
 
 **Stack:** TypeScript · NestJS 11 · PostgreSQL 16 + Prisma 5 · JWT · Swagger.
 **Infraestrutura:** Docker · AWS (EKS, ECR, RDS) · Kustomize · Terraform · GitHub Actions.
@@ -39,7 +39,7 @@ concentrando as regras de negócio no agregado **Ordem de Serviço**:
   a OS fica em *Aguardando peça* e **retoma a execução automaticamente** quando a peça dá entrada.
 - **Fila de trabalho** (`GET /ordens-servico/fila`): OS ativas ordenadas por prioridade de status,
   mais antigas primeiro, sem as finalizadas/entregues.
-- **Acompanhamento do cliente** por link público (token da OS): consultar o status e aprovar/recusar
+- **Acompanhamento do cliente** com login por CPF: listar as próprias OSs, consultar o status e aprovar/recusar
   orçamentos sem login de operador.
 - **Notificações** ao cliente disparadas por evento (ex.: orçamento enviado).
 
@@ -206,6 +206,12 @@ por um GESTOR via `POST /usuarios` (`{ username, senha, papel }`).
 
 No Swagger, clique em **Authorize** e cole o `accessToken` para testar as rotas pelo navegador.
 
+**Cliente.** As rotas de `/acompanhamento` exigem o **token do cliente**, emitido pelo login por
+CPF (Lambda `auth-cpf`, repo `oficina-lambda-auth`): `{ sub: clienteId, papel: "CLIENTE" }`,
+assinado com o mesmo `JWT_SECRET`. O cliente só enxerga as próprias OSs, e o token dele não abre
+rotas administrativas (403). Sem a Lambda, rodando localmente, dá para gerar o mesmo token dentro
+do container (veja o passo 5 do passeio abaixo).
+
 ---
 
 ## Passeio de 2 minutos (fluxo completo via curl)
@@ -242,16 +248,18 @@ ORCAMENTO=$(curl -s -X POST $API/ordens-servico/$OS/diagnostico -H "$AUTH" -H "$
         "pecas":    [{ "pecaId":    "33333333-3333-4333-8333-333333333333", "quantidade": 2 }] }' \
   | jq -r .orcamento.id)
 
-# 5. Consulta pública do cliente (só o id da OS, sem login)
-curl -s $API/acompanhamento/$OS | jq '{ status, total: .orcamentos[0].total }'
+# 5. O cliente entra com o CPF. Na nuvem quem emite o token é a Lambda auth-cpf; localmente,
+#    geramos o mesmo token dentro do container (mesmo JWT_SECRET, mesmo formato):
+TOKEN_CLIENTE=$(docker compose exec -T app node -e "console.log(require('jsonwebtoken').sign(
+  { sub: process.argv[1], papel: 'CLIENTE' }, process.env.JWT_SECRET, { expiresIn: '1h' }))" "$CLIENTE")
+CLI="Authorization: Bearer $TOKEN_CLIENTE"
+
+curl -s $API/acompanhamento -H "$CLI" | jq -c '.[] | { id, numero, status }'   # as OSs dele
+curl -s $API/acompanhamento/$OS -H "$CLI" | jq '{ status, total: .orcamentos[0].total }'
 
 # 6. Cliente aprova o orçamento → "Em execução" (e o estoque reserva as peças)
-#    Aprovar exige o TOKEN DA OS, que vai no link enviado ao cliente. No MVP o notificador
-#    registra esse link no log da aplicação, então dá para pescá-lo de lá:
-TOKEN_OS=$(docker compose logs app --since 5m | grep -o 'token=[A-Za-z0-9._-]*' | tail -1 | cut -d= -f2)
-
 curl -s -X POST $API/acompanhamento/$OS/orcamentos/$ORCAMENTO/resposta \
-  -H "Authorization: Bearer $TOKEN_OS" -H "$JSON" -d '{ "aprovado": true }' | jq -r .status
+  -H "$CLI" -H "$JSON" -d '{ "aprovado": true }' | jq -r .status
 
 # 7. Fila de trabalho (a OS aparece nela enquanto está ativa) e reserva no estoque
 curl -s $API/ordens-servico/fila -H "$AUTH" | jq -c '.[] | { numero, status }'
@@ -264,8 +272,9 @@ curl -s -X POST $API/ordens-servico/$OS/pagamento -H "$AUTH" -H "$JSON" -d '{ "p
 curl -s -X POST $API/ordens-servico/$OS/entrega -H "$AUTH" | jq -r .status              # Entregue
 ```
 
-> Sem o `Authorization` do passo 6 a resposta é `401 NAO_AUTENTICADO` ("Token de acompanhamento
-> ausente") — a consulta é pública, mas **aprovar/recusar não é**.
+> Sem o token do cliente, o acompanhamento responde `401 NAO_AUTENTICADO`. Com o token de
+> **outro** cliente, `403 NAO_AUTORIZADO`. E o `$TOKEN_CLIENTE` numa rota administrativa (ex.:
+> `GET /clientes`) também dá 403: o cliente não enxerga dados de ninguém além dele.
 >
 > Para ver o desvio de **peça em falta**, refaça o passo 4 usando a peça `44444444-4444-4444-8444-444444444444`
 > (saldo zero no seed): a aprovação leva a OS para *Aguardando peça*, e um
@@ -285,8 +294,8 @@ o contrato comentado, em [`docs/contrato-api.md`](docs/contrato-api.md).
   `GET /ordens-servico/fila`, `POST .../diagnostico/iniciar`, `POST .../diagnostico`,
   `POST .../execucao/concluir`, `POST .../orcamentos-adicionais`, `POST .../pagamento`,
   `POST .../entrega`, `GET /relatorios/tempo-medio-execucao`
-- **Acompanhamento (público, token da OS):** `GET /acompanhamento/{osId}`,
-  `POST .../orcamentos/{orcamentoId}/resposta`
+- **Acompanhamento (token do cliente, login por CPF):** `GET /acompanhamento`,
+  `GET /acompanhamento/{osId}`, `POST .../orcamentos/{orcamentoId}/resposta`
 - **Infra (público):** `GET /health`
 
 **Padrão de erro:**
@@ -305,7 +314,7 @@ Todo erro sai nesse envelope — inclusive os que nascem no validador ou no banc
 ## Fluxo de uso (jornada da OS)
 
 Sequência típica via API. As rotas administrativas exigem `Authorization: Bearer <accessToken>`;
-as de `/acompanhamento` usam o **token da OS** (devolvido na notificação ao cliente).
+as de `/acompanhamento` usam o **token do cliente**, do login por CPF.
 
 1. **Abrir a OS** — `POST /ordens-servico` `{ clienteId, veiculoId, problemaRelatado }` → *Recebida*.
 2. **Iniciar o diagnóstico** — `POST /ordens-servico/{id}/diagnostico/iniciar` → *Em diagnóstico*
@@ -376,7 +385,7 @@ flowchart LR
     end
 
     subgraph apoio["Apoio"]
-        idt["identidade<br/><i>JWT, papéis, token da OS</i>"]
+        idt["identidade<br/><i>JWT, papéis, token do cliente</i>"]
         notif["notificacoes<br/><i>reativo, sem agregado</i>"]
     end
 
@@ -660,8 +669,8 @@ Pelo Swagger dá para autenticar e disparar as chamadas sem sair do navegador:
 
 1. `POST /auth/login` com `gestor` / `gestor123` → copie o `accessToken`;
 2. clique em **Authorize**, cole o token e confirme;
-3. as rotas administrativas passam a responder. As de `/acompanhamento` são públicas e usam o
-   token da OS.
+3. as rotas administrativas passam a responder. As de `/acompanhamento` pedem o token do
+   cliente (login por CPF) no lugar do `accessToken`.
 
 Para usar no **Postman** ou **Insomnia**, importe o OpenAPI JSON — os dois leem o formato
 direto pela URL:

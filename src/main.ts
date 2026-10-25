@@ -31,7 +31,7 @@ async function bootstrap(): Promise<void> {
     .setTitle('Sistema de Oficina — API')
     .setDescription(
       'Atendimento e Execução de Serviços de oficina mecânica (DDD, monolito modular). ' +
-        'Rotas administrativas exigem JWT (Bearer); as de /acompanhamento são públicas (token da OS). ' +
+        'Rotas administrativas exigem o JWT do operador (Bearer); as de /acompanhamento, o JWT do cliente (login por CPF). ' +
         'Erros seguem o envelope { erro: { codigo, mensagem, detalhes } }.',
     )
     .setVersion('1.0')
@@ -44,7 +44,7 @@ async function bootstrap(): Promise<void> {
     .addTag('Ordens de Serviço', 'Ciclo de vida da OS (admin)')
     .addTag(
       'Acompanhamento do cliente',
-      'Consulta e decisões do cliente (público)',
+      'Consulta e decisões do cliente (token do login por CPF)',
     )
     .addTag('Relatórios', 'Indicadores gerenciais')
     .build();

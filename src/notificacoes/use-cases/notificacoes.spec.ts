@@ -16,11 +16,7 @@ describe('NotificarCliente (assinante de eventos)', () => {
 
   beforeEach(() => {
     notificador = { notificar: jest.fn() };
-    const tokens = {
-      gerar: jest.fn().mockResolvedValue('token-fake'),
-      verificar: jest.fn(),
-    };
-    handler = new NotificarCliente(notificador, tokens);
+    handler = new NotificarCliente(notificador);
   });
 
   it('notifica ao enviar o orçamento', async () => {
@@ -31,6 +27,17 @@ describe('NotificarCliente (assinante de eventos)', () => {
     expect(notificador.notificar).toHaveBeenCalledWith(
       expect.objectContaining({ ordemId: 'os-1', tipo: 'ORCAMENTO_ENVIADO' }),
     );
+  });
+
+  it('o link do orçamento leva à OS sem credencial: o cliente entra com o CPF', async () => {
+    await handler.aoEnviar({
+      ordemId: 'os-1',
+      numero: 'OS-1',
+    } as OrcamentoEnviado);
+    const { mensagem } = notificador.notificar.mock.calls[0][0];
+    expect(mensagem).toContain('/acompanhamento/os-1');
+    expect(mensagem).toContain('CPF');
+    expect(mensagem).not.toContain('token');
   });
 
   it('notifica ao aprovar (fan-out: estoque reserva, notificacoes avisa)', async () => {
