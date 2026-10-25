@@ -1,0 +1,305 @@
+{
+  "name": "Oficina",
+  "description": "Negócio (ordens de serviço) e plataforma (API no EKS) da Oficina.",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Negócio",
+      "description": "Ordens de serviço",
+      "widgets": [
+        {
+          "title": "OS abertas hoje",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT count(*) AS 'OS abertas' FROM OrdemServicoStatus WHERE para = 'RECEBIDA' FACET appName SINCE today"
+              }
+            ]
+          }
+        },
+        {
+          "title": "OS abertas por dia",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT count(*) FROM OrdemServicoStatus WHERE para = 'RECEBIDA' FACET appName TIMESERIES 1 day SINCE 7 days ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Tempo médio em cada status (minutos)",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT average(minutosNoStatusAnterior) AS 'minutos' FROM OrdemServicoStatus WHERE de != '' FACET de SINCE 7 days ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Mudanças de status por destino",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT count(*) FROM OrdemServicoStatus WHERE de != '' FACET para SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Erros de integração",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT count(*) FROM FalhaIntegracao FACET integracao TIMESERIES SINCE 3 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Últimas falhas de integração",
+          "layout": {
+            "column": 7,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT timestamp, appName, integracao, tipo, ordemId, mensagem FROM FalhaIntegracao SINCE 1 day ago LIMIT 20"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Plataforma",
+      "description": "API, Kubernetes e logs",
+      "widgets": [
+        {
+          "title": "Requisições por minuto",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT rate(count(*), 1 minute) FROM Transaction WHERE appName LIKE 'oficina-api-%' FACET appName TIMESERIES SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Latência p95 (ms)",
+          "layout": {
+            "column": 5,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT percentile(duration * 1000, 95) FROM Transaction WHERE appName LIKE 'oficina-api-%' FACET appName TIMESERIES SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Taxa de erro (5xx)",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT percentage(count(*), WHERE error IS true) FROM Transaction WHERE appName LIKE 'oficina-api-%' FACET appName TIMESERIES SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "CPU dos pods da API (cores)",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT average(cpuUsedCores) FROM K8sContainerSample WHERE clusterName = 'oficina-eks' AND containerName = 'api' FACET namespaceName TIMESERIES SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Memória dos pods da API (MB)",
+          "layout": {
+            "column": 5,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT average(memoryWorkingSetBytes) / 1e6 FROM K8sContainerSample WHERE clusterName = 'oficina-eks' AND containerName = 'api' FACET namespaceName TIMESERIES SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Pods disponíveis (HPA)",
+          "layout": {
+            "column": 9,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT latest(podsAvailable) FROM K8sDeploymentSample WHERE clusterName = 'oficina-eks' AND deploymentName = 'oficina-api' FACET namespaceName TIMESERIES SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Logs de erro da API",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [
+                  0
+                ],
+                "query": "SELECT timestamp, entity.name, requestId, message FROM Log WHERE entity.name LIKE 'oficina-api-%' AND level = 'error' SINCE 1 hour ago LIMIT 50"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

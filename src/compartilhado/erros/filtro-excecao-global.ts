@@ -29,6 +29,8 @@ export interface OpcoesFiltroExcecao {
   tradutores?: TradutorDeErro[];
   /** Injetável para manter os testes determinísticos. */
   gerarIdDaOcorrencia?: () => string;
+  /** Chamado com o erro não tratado (500): o APM guarda a stack trace. */
+  aoErroInesperado?: (erro: unknown, idDaOcorrencia: string) => void;
 }
 
 /**
@@ -42,10 +44,12 @@ export class FiltroExcecaoGlobal implements ExceptionFilter {
   private readonly logger = new Logger(FiltroExcecaoGlobal.name);
   private readonly tradutores: TradutorDeErro[];
   private readonly gerarIdDaOcorrencia: () => string;
+  private readonly aoErroInesperado: (erro: unknown, id: string) => void;
 
   constructor(opcoes: OpcoesFiltroExcecao = {}) {
     this.tradutores = opcoes.tradutores ?? [];
     this.gerarIdDaOcorrencia = opcoes.gerarIdDaOcorrencia ?? randomUUID;
+    this.aoErroInesperado = opcoes.aoErroInesperado ?? (() => undefined);
   }
 
   catch(excecao: unknown, host: ArgumentsHost): void {
@@ -92,6 +96,7 @@ export class FiltroExcecaoGlobal implements ExceptionFilter {
 
     const idDaOcorrencia = this.gerarIdDaOcorrencia();
     this.logger.error(`Erro não tratado [${idDaOcorrencia}]`, excecao);
+    this.aoErroInesperado(excecao, idDaOcorrencia);
     return {
       status: HttpStatus.INTERNAL_SERVER_ERROR,
       codigo: 'ERRO_INTERNO',

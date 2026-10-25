@@ -28,6 +28,8 @@ env:
   CLUSTER: oficina-eks
   ECR_REPOSITORIO: oficina-app
   RDS_IDENTIFICADOR: oficina-db
+  # Chart da integração Kubernetes do New Relic (versão fixa: deploy repetível).
+  NRI_BUNDLE_VERSAO: 8.0.34
 
 permissions:
   contents: read
@@ -128,6 +130,7 @@ jobs:
         env:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
         run: |
           read -r DB_HOST DB_PORTA DB_USUARIO DB_NOME <<< "$(aws rds describe-db-instances \
             --db-instance-identifier "$RDS_IDENTIFICADOR" \
@@ -143,7 +146,33 @@ jobs:
           kubectl create secret generic oficina-secrets -n "$NAMESPACE" \
             --from-literal=DATABASE_URL="$DATABASE_URL" \
             --from-literal=JWT_SECRET="$JWT_SECRET" \
+            --from-literal=NEW_RELIC_LICENSE_KEY="$NEW_RELIC_LICENSE_KEY" \
             --dry-run=client -o yaml | kubectl apply -f -
+
+      # Integração Kubernetes do New Relic: CPU/memória de nós e pods, estado
+      # dos objetos (kube-state-metrics) e eventos do cluster. É do cluster, não
+      # do ambiente, então os dois deploys aplicam o mesmo release (idempotente).
+      # Logs ficam com o agente da aplicação; Prometheus e Pixie, desligados para
+      # caber nos 2 nós.
+      - name: Integração Kubernetes (New Relic)
+        env:
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+        run: |
+          helm repo add newrelic https://helm-charts.newrelic.com
+          helm upgrade --install newrelic-bundle newrelic/nri-bundle \
+            --version "$NRI_BUNDLE_VERSAO" \
+            --namespace newrelic --create-namespace \
+            --set global.licenseKey="$NEW_RELIC_LICENSE_KEY" \
+            --set global.cluster="$CLUSTER" \
+            --set global.lowDataMode=true \
+            --set kube-state-metrics.enabled=true \
+            --set nri-kube-events.enabled=true \
+            --set nri-metadata-injection.enabled=false \
+            --set newrelic-prometheus-agent.enabled=false \
+            --set newrelic-logging.enabled=false \
+            --set newrelic-pixie.enabled=false \
+            --set k8s-agents-operator.enabled=false \
+            --wait --timeout 5m
 
       - name: Aplicar os manifestos
         run: |

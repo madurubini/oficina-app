@@ -116,4 +116,19 @@ describe('FiltroExcecaoGlobal', () => {
       },
     });
   });
+
+  it('avisa o APM só do erro não tratado, com o id de ocorrência', () => {
+    const aoErroInesperado = jest.fn();
+    const filtro = new FiltroExcecaoGlobal({
+      gerarIdDaOcorrencia: () => 'ocorrencia-2',
+      aoErroInesperado,
+    });
+    const erro = new Error('falhou');
+
+    filtro.catch(new ErroValidacao('inválido'), capturarResposta().host);
+    filtro.catch(erro, capturarResposta().host);
+
+    expect(aoErroInesperado).toHaveBeenCalledTimes(1);
+    expect(aoErroInesperado).toHaveBeenCalledWith(erro, 'ocorrencia-2');
+  });
 });

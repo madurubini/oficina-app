@@ -1,12 +1,20 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { FiltroExcecaoGlobal } from './compartilhado/erros/filtro-excecao-global';
+import {
+  AGENTE_APM,
+  AgenteApm,
+} from './compartilhado/infraestrutura/observabilidade/agente-apm';
 import { traduzirErroPrisma } from './compartilhado/infraestrutura/prisma/erros-prisma';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  // Os logs do boot esperam o logger JSON (pino) ficar pronto.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(app.get(Logger));
+  const agente = app.get<AgenteApm>(AGENTE_APM);
 
   // Prefixo global do contrato: /api/v1
   app.setGlobalPrefix('api/v1');
@@ -22,8 +30,16 @@ async function bootstrap(): Promise<void> {
 
   // Envelope de erro padrão do contrato. O tradutor do Prisma converte violação
   // de constraint em erro de domínio (409/404/400) em vez de deixar virar 500.
+  // O 500 que sobrar vai para o New Relic com a stack trace.
   app.useGlobalFilters(
-    new FiltroExcecaoGlobal({ tradutores: [traduzirErroPrisma] }),
+    new FiltroExcecaoGlobal({
+      tradutores: [traduzirErroPrisma],
+      aoErroInesperado: (erro, idDaOcorrencia) =>
+        agente.noticeError(
+          erro instanceof Error ? erro : new Error(String(erro)),
+          { idDaOcorrencia },
+        ),
+    }),
   );
 
   // Swagger em /api/docs.
@@ -53,10 +69,9 @@ async function bootstrap(): Promise<void> {
 
   const porta = process.env.PORT ? Number(process.env.PORT) : 3000;
   await app.listen(porta);
-  // eslint-disable-next-line no-console
-  console.log(`API ouvindo em http://localhost:${porta}/api/v1`);
-  // eslint-disable-next-line no-console
-  console.log(`Swagger em http://localhost:${porta}/api/docs`);
+  const logger = app.get(Logger);
+  logger.log(`API ouvindo em http://localhost:${porta}/api/v1`);
+  logger.log(`Swagger em http://localhost:${porta}/api/docs`);
 }
 
 void bootstrap();

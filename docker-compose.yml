@@ -37,6 +37,13 @@ services:
       NODE_ENV: production
       JWT_SECRET: ${JWT_SECRET:-segredo-de-desenvolvimento-nao-use-em-producao}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-3600s}
+      # New Relic desligado por padrão. Para testar com a sua conta, crie um
+      # .env (fora do git) com NEW_RELIC_ENABLED=true e NEW_RELIC_LICENSE_KEY.
+      NEW_RELIC_ENABLED: ${NEW_RELIC_ENABLED:-false}
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY:-}
+      NEW_RELIC_APP_NAME: ${NEW_RELIC_APP_NAME:-oficina-api-local}
+      NEW_RELIC_ERROR_COLLECTOR_IGNORE_ERROR_CODES: '400-499'
+      SIMULAR_FALHA_NOTIFICACAO: ${SIMULAR_FALHA_NOTIFICACAO:-false}
     ports:
       - '${APP_PORT:-3000}:3000'
     healthcheck:

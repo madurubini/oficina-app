@@ -115,16 +115,22 @@ export class OrdemServico extends AgregadoRaiz<string> {
       );
     }
     const anterior = this.props.status;
+    const agora = new Date();
+    const ultimo = this.props.historico[this.props.historico.length - 1];
+    const desde = ultimo?.em ?? agora;
     this.props.status = novo;
     if (novo === StatusOS.EM_EXECUCAO && !this.props.iniciadoExecucaoEm) {
-      this.props.iniciadoExecucaoEm = new Date();
+      this.props.iniciadoExecucaoEm = agora;
     }
     this.props.historico.push({
       status: novo,
-      em: new Date(),
+      em: agora,
       por: por ?? null,
     });
-    this.registrarEvento(new StatusOSAlterado(this.id, anterior, novo));
+    const minutos = Math.round((agora.getTime() - desde.getTime()) / 600) / 100;
+    this.registrarEvento(
+      new StatusOSAlterado(this.id, anterior, novo, minutos),
+    );
     if (novo === StatusOS.CANCELADA) {
       this.registrarEvento(new OSCancelada(this.id));
     }
