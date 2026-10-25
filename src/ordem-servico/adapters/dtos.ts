@@ -136,6 +136,10 @@ class PendenciaEstoqueDto {
 }
 
 export class AcompanhamentoRespostaDto {
+  @ApiProperty({
+    description: 'Id da OS, usado nas demais rotas de acompanhamento',
+  })
+  id!: string;
   @ApiProperty() numero!: string;
   @ApiProperty() problemaRelatado!: string;
   @ApiProperty() status!: string;

@@ -7,11 +7,9 @@ import {
   ErroConflito,
   ErroValidacao,
 } from '../../compartilhado/erros/erros-dominio';
-import { Papel, Usuario } from '../entities/usuario';
+import { PAPEIS, Papel, Usuario } from '../entities/usuario';
 import { HASH_DE_SENHA, HashDeSenha } from './hash-de-senha';
 import { USUARIO_REPOSITORY, UsuarioRepository } from './usuario.repositorio';
-
-const PAPEIS_VALIDOS: Papel[] = ['RECEPCIONISTA', 'MECANICO', 'GESTOR'];
 
 export interface EntradaCadastrarUsuario {
   username: string;
@@ -50,9 +48,9 @@ export class CadastrarUsuario {
     if (!entrada.senha || entrada.senha.length < 6) {
       throw new ErroValidacao('A senha deve ter ao menos 6 caracteres.');
     }
-    if (!PAPEIS_VALIDOS.includes(entrada.papel)) {
+    if (!PAPEIS.includes(entrada.papel)) {
       throw new ErroValidacao('Papel inválido.', {
-        papeisValidos: PAPEIS_VALIDOS,
+        papeisValidos: PAPEIS,
       });
     }
 

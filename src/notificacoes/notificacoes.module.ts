@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { IdentidadeModule } from '../identidade/identidade.module';
 import { OrdemServicoModule } from '../ordem-servico/ordem-servico.module';
 import { NotificarCliente } from './use-cases/notificar-cliente.handler';
 import { ReenviarPendentes } from './use-cases/reenviar-pendentes.policy';
@@ -14,7 +13,7 @@ import { NotificadorSimulado } from './adapters/gateways/notificador-simulado';
  * próprio: por isso não tem camada `entities`.
  */
 @Module({
-  imports: [OrdemServicoModule, IdentidadeModule],
+  imports: [OrdemServicoModule],
   providers: [
     { provide: NOTIFICADOR, useClass: NotificadorSimulado },
     NotificarCliente,

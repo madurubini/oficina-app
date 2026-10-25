@@ -8,21 +8,22 @@ import { CadastrarUsuario } from './use-cases/cadastrar-usuario.usecase';
 import { USUARIO_REPOSITORY } from './use-cases/usuario.repositorio';
 import { HASH_DE_SENHA } from './use-cases/hash-de-senha';
 import { GERADOR_DE_TOKEN } from './use-cases/gerador-de-token';
-import { ACOMPANHAMENTO_TOKEN } from './use-cases/acompanhamento-token';
+import { TOKEN_DO_CLIENTE } from './use-cases/token-do-cliente';
 import { BcryptHashDeSenha } from './adapters/gateways/bcrypt-hash-de-senha';
-import { JwtAcompanhamentoToken } from './adapters/gateways/jwt-acompanhamento-token';
 import { JwtGeradorDeToken } from './adapters/gateways/jwt-gerador-de-token';
+import { JwtTokenDoCliente } from './adapters/gateways/jwt-token-do-cliente';
 import { PrismaUsuarioRepository } from './adapters/gateways/prisma-usuario.repositorio';
 import { JwtStrategy } from './adapters/guards/jwt.strategy';
 import { PapeisGuard } from './adapters/guards/papeis.guard';
-import { AcompanhamentoGuard } from './adapters/guards/acompanhamento.guard';
+import { ClienteGuard } from './adapters/guards/cliente.guard';
 import { AuthController } from './adapters/controllers/auth.controller';
 import { UsuariosController } from './adapters/controllers/usuarios.controller';
 
 /**
- * Contexto Identidade e Acesso (transversal às rotas administrativas).
+ * Contexto Identidade e Acesso (transversal às rotas protegidas).
  * Liga as portas do domínio às implementações de infraestrutura e expõe o
- * JwtStrategy/JwtAuthGuard para os demais módulos protegerem suas rotas.
+ * JwtStrategy/JwtAuthGuard (operadores) e o ClienteGuard (cliente logado por
+ * CPF) para os demais módulos protegerem suas rotas.
  */
 @Module({
   imports: [
@@ -47,17 +48,12 @@ import { UsuariosController } from './adapters/controllers/usuarios.controller';
     CadastrarUsuario,
     JwtStrategy,
     PapeisGuard,
-    AcompanhamentoGuard,
+    ClienteGuard,
     { provide: USUARIO_REPOSITORY, useClass: PrismaUsuarioRepository },
     { provide: HASH_DE_SENHA, useClass: BcryptHashDeSenha },
     { provide: GERADOR_DE_TOKEN, useClass: JwtGeradorDeToken },
-    { provide: ACOMPANHAMENTO_TOKEN, useClass: JwtAcompanhamentoToken },
+    { provide: TOKEN_DO_CLIENTE, useClass: JwtTokenDoCliente },
   ],
-  exports: [
-    JwtModule,
-    PassportModule,
-    ACOMPANHAMENTO_TOKEN,
-    AcompanhamentoGuard,
-  ],
+  exports: [JwtModule, PassportModule, TOKEN_DO_CLIENTE, ClienteGuard],
 })
 export class IdentidadeModule {}

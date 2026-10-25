@@ -1,5 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ErroNaoEncontrado } from '../../compartilhado/erros/erros-dominio';
+import {
+  ErroNaoAutorizado,
+  ErroNaoEncontrado,
+} from '../../compartilhado/erros/erros-dominio';
 import { OrdemServico } from '../entities/ordem-servico';
 import { PRIORIDADE_FILA } from '../entities/status-os';
 import {
@@ -37,6 +40,24 @@ export class ConsultarOrdemServico {
     const ordem = await this.ordens.buscarPorId(id);
     if (!ordem) {
       throw new ErroNaoEncontrado('Ordem de serviço não encontrada.', { id });
+    }
+    return ordem;
+  }
+
+  /** As OSs do cliente logado (acompanhamento), da mais recente à mais antiga. */
+  async listarDoCliente(clienteId: string): Promise<OrdemServico[]> {
+    return this.ordens.listar({ clienteId });
+  }
+
+  /**
+   * Busca a OS e confere o dono: o token de um cliente não abre a OS de outro
+   * (anti-IDOR). 403 e não 404 porque o id já é um uuid não adivinhável e o
+   * erro explícito ajuda o app a tratar o caso.
+   */
+  async buscarDoCliente(id: string, clienteId: string): Promise<OrdemServico> {
+    const ordem = await this.buscar(id);
+    if (ordem.clienteId !== clienteId) {
+      throw new ErroNaoAutorizado('Esta OS não pertence ao cliente.', { id });
     }
     return ordem;
   }
