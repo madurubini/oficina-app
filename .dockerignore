@@ -31,3 +31,4 @@ sonar-project.properties
 
 # Mantidos de propósito (a imagem precisa): prisma/, docker-entrypoint.sh,
 # package.json, package-lock.json
+observabilidade

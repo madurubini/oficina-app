@@ -8,4 +8,4 @@ echo "Rodando seed (idempotente)..."
 node dist/prisma/seed.js
 
 echo "Iniciando a API..."
-exec node dist/main
+exec node -r newrelic dist/main

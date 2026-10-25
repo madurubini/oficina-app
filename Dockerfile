@@ -40,6 +40,15 @@ USER node
 
 EXPOSE 3000
 
+# Agente do New Relic: configurado só por variáveis de ambiente, desligado por
+# padrão (sem conta, a API sobe igual). No Kubernetes, o ConfigMap o liga e o
+# Secret traz a license key. O log do próprio agente vai para a saída padrão.
+ENV NEW_RELIC_ENABLED=false \
+    NEW_RELIC_NO_CONFIG_FILE=true \
+    NEW_RELIC_LOG=stdout \
+    NEW_RELIC_LOG_LEVEL=warn
+
 # Só inicia a API. Migrar o banco é de quem orquestra: docker-entrypoint.sh no
-# Compose, Job de migrations no Kubernetes.
-CMD ["node", "dist/main"]
+# Compose, Job de migrations no Kubernetes. O `-r newrelic` carrega o agente
+# antes de tudo, para ele instrumentar HTTP, Prisma e os logs.
+CMD ["node", "-r", "newrelic", "dist/main"]
