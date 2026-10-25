@@ -13,3 +13,12 @@ images:
   - name: oficina-api
     newName: oficina-api
     newTag: local
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: oficina-config
+    patch: |-
+      - op: replace
+        path: /data/NEW_RELIC_APP_NAME
+        value: oficina-api-prod

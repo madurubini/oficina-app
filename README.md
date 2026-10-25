@@ -183,6 +183,7 @@ cp .env.example .env
 | `APP_PORT` | `3000` | Porta da API no host |
 | `JWT_SECRET` | segredo de desenvolvimento | Assinatura dos tokens |
 | `JWT_EXPIRES_IN` | `3600s` | Validade do token |
+| `NEW_RELIC_ENABLED` / `NEW_RELIC_LICENSE_KEY` | `false` / vazio | Liga o agente do New Relic com a sua conta ([observabilidade](docs/observabilidade.md)) |
 
 ---
 
@@ -557,11 +558,12 @@ execução do workflow.
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Sessão do Learner Lab (mudam a cada sessão) |
 | `DB_PASSWORD` | Senha do RDS, a mesma do repo `oficina-infra-db` |
 | `JWT_SECRET` | Assinatura dos tokens; a mesma das Lambdas |
+| `NEW_RELIC_LICENSE_KEY` | License key (Ingest) do New Relic: vai para o Secret do app e para a integração Kubernetes |
 
 ### Secrets: de onde vem cada credencial
 
-Nenhuma credencial fica em arquivo versionado. O Secret `oficina-secrets` (chaves `DATABASE_URL`
-e `JWT_SECRET`) é **criado pelo pipeline** a cada deploy:
+Nenhuma credencial fica em arquivo versionado. O Secret `oficina-secrets` (chaves `DATABASE_URL`,
+`JWT_SECRET` e `NEW_RELIC_LICENSE_KEY`) é **criado pelo pipeline** a cada deploy:
 
 ```mermaid
 flowchart LR
@@ -653,6 +655,7 @@ réplicas migrarem o mesmo banco ao mesmo tempo. O Job roda uma vez por deploy, 
 | **`requests` declarados** | O HPA calcula a utilização como percentual do `requests` — sem ele, o autoscaler fica em `<unknown>` e nunca escala |
 | **Usuário não-root** (uid 1000) | Reduz o impacto de uma eventual execução de código no container; o `runAsNonRoot` exige uid **numérico**, então declarar `USER node` no Dockerfile não basta |
 | **metrics-server como add-on do EKS** | O EKS não traz o metrics-server; sem ele o HPA não tem métrica para decidir. Como add-on, ele nasce com o cluster no repo de infraestrutura |
+| **New Relic pelo agente da aplicação** | Um agente (`node -r newrelic`) entrega traces, métricas, erros e os logs já ligados ao trace, sem coletor de logs à parte. A integração Kubernetes (`nri-bundle`, versão fixa) vai só com o essencial (infraestrutura, kube-state-metrics, eventos) para caber nos 2 nós. Detalhes em [`docs/observabilidade.md`](docs/observabilidade.md) |
 
 ## Collection das APIs
 
@@ -709,5 +712,6 @@ Demonstra, no ambiente em execução:
 | [`docs/schema.prisma`](docs/schema.prisma) | Cópia documental do schema de dados. |
 | [`docs/adr/`](docs/adr) | Decisões da Fase 1 (ex.: escolha do banco). |
 | [`docs/banco-de-dados.md`](docs/banco-de-dados.md) | Justificativa do banco e diagrama ER. |
+| [`docs/observabilidade.md`](docs/observabilidade.md) | New Relic: requestId, eventos de negócio, dashboard, alertas e monitor. |
 | [`k8s/`](k8s) | Manifestos da aplicação, comentados recurso a recurso. |
 | [`docs/relatorio-vulnerabilidades.md`](docs/relatorio-vulnerabilidades.md) | Análise de segurança do MVP. |

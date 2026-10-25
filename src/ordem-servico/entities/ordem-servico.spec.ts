@@ -75,6 +75,23 @@ describe('Máquina de estados da OS', () => {
     expect(eventos[0].nomeEvento).toBe('ordem-servico.status-alterado');
   });
 
+  it('o evento de status leva os minutos que a OS passou no status anterior', () => {
+    jest.useFakeTimers({ now: new Date('2026-10-25T10:00:00Z') });
+    try {
+      const os = abrirOS();
+      os.puxarEventos();
+      jest.setSystemTime(new Date('2026-10-25T10:45:30Z'));
+      os.transicionarPara(StatusOS.EM_DIAGNOSTICO);
+      expect(os.puxarEventos()[0]).toMatchObject({
+        de: StatusOS.RECEBIDA,
+        para: StatusOS.EM_DIAGNOSTICO,
+        minutosNoStatusAnterior: 45.5,
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('rejeita transição fora da ordem (ex.: Recebida → Em execução)', () => {
     const os = abrirOS();
     expect(() => os.transicionarPara(StatusOS.EM_EXECUCAO)).toThrow(

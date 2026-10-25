@@ -16,6 +16,13 @@ images:
 
 patches:
   - target:
+      kind: ConfigMap
+      name: oficina-config
+    patch: |-
+      - op: replace
+        path: /data/NEW_RELIC_APP_NAME
+        value: oficina-api-homolog
+  - target:
       kind: Deployment
       name: oficina-api
     patch: |-

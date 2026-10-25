@@ -27,12 +27,16 @@ export class OSAberta extends EventoDominio {
   }
 }
 
-/** Gravado também em historico_status. */
+/**
+ * Gravado também em historico_status. Leva quanto tempo a OS ficou no status
+ * anterior: é o que o painel de "tempo médio por status" soma.
+ */
 export class StatusOSAlterado extends EventoDominio {
   constructor(
     readonly ordemId: string,
     readonly de: StatusOS,
     readonly para: StatusOS,
+    readonly minutosNoStatusAnterior: number,
   ) {
     super();
   }

@@ -9,3 +9,13 @@ data:
   PORT: '3000'
   NODE_ENV: 'production'
   JWT_EXPIRES_IN: '3600s'
+  # New Relic: o agente é carregado pelo Dockerfile; aqui ele é ligado. A
+  # license key vem do Secret oficina-secrets (criado pelo pipeline) e o nome
+  # da aplicação, de cada overlay.
+  NEW_RELIC_ENABLED: 'true'
+  NEW_RELIC_APP_NAME: 'oficina-api'
+  NEW_RELIC_DISTRIBUTED_TRACING_ENABLED: 'true'
+  NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED: 'true'
+  # 4xx é regra de negócio (validação, sem token, transição inválida), não falha.
+  NEW_RELIC_ERROR_COLLECTOR_IGNORE_ERROR_CODES: '400-499'
+  SIMULAR_FALHA_NOTIFICACAO: 'false'
