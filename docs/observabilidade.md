@@ -35,7 +35,8 @@ Cada requisição tem um id, e o mesmo valor aparece em quatro lugares:
    envia o próprio `requestId` no cabeçalho, e a API o reaproveita.
 
 Se o cabeçalho não vem (chamada direta no Load Balancer, ambiente local), a API gera um UUID.
-Valores com caracteres fora de `[A-Za-z0-9_-]` ou com mais de 64 caracteres são ignorados,
+Valores com caracteres fora de `[A-Za-z0-9_+/=-]` (o id do Gateway vem em base64, ex.:
+`F0HpDiyQIAMEVmg=`) ou com mais de 64 caracteres são ignorados,
 para ninguém injetar linhas falsas no log.
 
 Para achar tudo de uma requisição: `SELECT * FROM Log WHERE requestId = '<id>'`, ou abra
@@ -89,8 +90,11 @@ Em **Alerts** → **Alert Policies** → **New alert policy** (`Oficina`), crie 
 | Condição | NRQL | Limite |
 |---|---|---|
 | Falha no processamento de OS | `SELECT count(*) FROM FalhaIntegracao` | acima de 0 em 1 minuto → crítico |
-| Erro 5xx na API | `SELECT count(*) FROM TransactionError WHERE appName LIKE 'oficina-api-%'` | acima de 0 em 1 minuto → crítico |
-| API lenta | `SELECT percentile(duration, 95) FROM Transaction WHERE appName = 'oficina-api-prod'` | acima de 1 s por 5 minutos → aviso |
+| Erro 5xx na API | `SELECT count(*) FROM TransactionError WHERE appName LIKE 'oficina-api-%' AND numeric(http.statusCode) >= 500` | acima de 0 em 1 minuto → crítico |
+| API lenta | `SELECT percentile(duration, 95) FROM Transaction WHERE appName LIKE 'oficina-api-%'` | acima de 1 s por 5 minutos → aviso; acima de 2 s → crítico |
+
+O filtro de status no 5xx importa: a falha de notificação também fica registrada na transação
+(com resposta 200), e sem ele as duas condições disparariam juntas.
 
 Para receber o aviso, ligue a política a um destino em **Alerts** → **Destinations** (e-mail
 basta).
