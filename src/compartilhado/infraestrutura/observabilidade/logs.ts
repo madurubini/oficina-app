@@ -5,8 +5,12 @@ import { AgenteApm } from './agente-apm';
 
 export const CABECALHO_REQUEST_ID = 'x-request-id';
 
-/** Só aceita um id de quem chama (o API Gateway) se for curto e sem símbolos. */
-const ID_ACEITO = /^[\w-]{1,64}$/;
+/**
+ * Só aceita um id de quem chama se for curto e sem espaço, quebra de linha ou
+ * aspas. Inclui os caracteres do base64 (`+`, `/`, `=`): o id do API Gateway
+ * vem assim (ex.: `F0HpDiyQIAMEVmg=`).
+ */
+const ID_ACEITO = /^[\w+/=-]{1,64}$/;
 
 /**
  * Cada requisição ganha um id: o que veio no `x-request-id` (o API Gateway

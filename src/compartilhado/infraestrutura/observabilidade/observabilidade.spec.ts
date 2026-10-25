@@ -32,6 +32,14 @@ describe('gerarRequestId', () => {
     );
   });
 
+  it('aceita o id do API Gateway, que vem em base64', () => {
+    const { req, res, agente } = requisicao({
+      'x-request-id': 'F0HpDiyQIAMEVmg=',
+    });
+
+    expect(gerarRequestId(req, res, agente)).toBe('F0HpDiyQIAMEVmg=');
+  });
+
   it('gera um id novo quando não vem nenhum', () => {
     const { req, res, agente } = requisicao();
 
