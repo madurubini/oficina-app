@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -103,7 +104,9 @@ export class OrdensServicoController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Detalhe completo da OS' })
-  async porId(@Param('id') id: string): Promise<OrdemServicoRespostaDto> {
+  async porId(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<OrdemServicoRespostaDto> {
     return apresentarOrdemServico(await this.consulta.buscar(id));
   }
 
@@ -118,7 +121,7 @@ export class OrdensServicoController {
   })
   @ApiForbiddenResponse({ description: 'Apenas GESTOR pode corrigir o status' })
   async status(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AlterarStatusDto,
     @UsuarioAtual() usuario: UsuarioAutenticado,
   ): Promise<OrdemServicoRespostaDto> {
@@ -137,7 +140,7 @@ export class OrdensServicoController {
       'Inicia o diagnóstico — o mecânico assume a OS antes de registrar itens (status → Em diagnóstico)',
   })
   async iniciar(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @UsuarioAtual() usuario: UsuarioAutenticado,
   ): Promise<OrdemServicoRespostaDto> {
     const ordem = await this.iniciarDiagnostico.executar({
@@ -154,7 +157,7 @@ export class OrdensServicoController {
       'Registra serviços/peças e conclui o diagnóstico (verifica estoque, cota faltantes, gera e envia o orçamento; status → Aguardando aprovação)',
   })
   async diagnostico(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RegistrarDiagnosticoDto,
     @UsuarioAtual() usuario: UsuarioAutenticado,
   ): Promise<DiagnosticoRespostaDto> {
@@ -174,7 +177,7 @@ export class OrdensServicoController {
       'Conclui a execução (baixa peças reservadas, registra tempo; → Finalizada)',
   })
   async concluir(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @UsuarioAtual() usuario: UsuarioAutenticado,
   ): Promise<OrdemServicoRespostaDto> {
     const ordem = await this.concluirExecucao.executar({
@@ -191,7 +194,7 @@ export class OrdensServicoController {
       'Lança um orçamento adicional durante a execução (envia ao cliente para autorizar)',
   })
   async lancarOrcamentoAdicionalEndpoint(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: LancarOrcamentoAdicionalDto,
   ): Promise<OrdemServicoRespostaDto> {
     const ordem = await this.lancarOrcamentoAdicional.executar({
@@ -207,7 +210,7 @@ export class OrdensServicoController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Confirma o pagamento (manual); libera a entrega' })
   async pagamento(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: PagamentoDto,
   ): Promise<OrdemServicoRespostaDto> {
     if (!dto.pago) {
@@ -223,7 +226,7 @@ export class OrdensServicoController {
     summary: 'Entrega o veículo e encerra a OS (exige pagamento confirmado)',
   })
   async entrega(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @UsuarioAtual() usuario: UsuarioAutenticado,
   ): Promise<OrdemServicoRespostaDto> {
     const ordem = await this.entregarVeiculo.executar({

@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -51,7 +52,7 @@ export class AcompanhamentoController {
     summary: 'Status, orçamentos e histórico de uma OS do cliente',
   })
   async consultar(
-    @Param('osId') osId: string,
+    @Param('osId', ParseUUIDPipe) osId: string,
     @ClienteAtual() cliente: ClienteAutenticado,
   ): Promise<AcompanhamentoRespostaDto> {
     return apresentarAcompanhamento(
@@ -66,8 +67,8 @@ export class AcompanhamentoController {
       'Cliente aprova ou recusa um orçamento da própria OS (roteia para dois casos de uso)',
   })
   async responder(
-    @Param('osId') osId: string,
-    @Param('orcamentoId') orcamentoId: string,
+    @Param('osId', ParseUUIDPipe) osId: string,
+    @Param('orcamentoId', ParseUUIDPipe) orcamentoId: string,
     @Body() dto: RespostaOrcamentoDto,
     @ClienteAtual() cliente: ClienteAutenticado,
   ): Promise<AcompanhamentoRespostaDto> {
