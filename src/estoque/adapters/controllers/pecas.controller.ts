@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -43,14 +44,16 @@ export class PecasController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Detalha uma peça' })
-  async porId(@Param('id') id: string): Promise<PecaRespostaDto> {
+  async porId(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PecaRespostaDto> {
     return apresentarPeca(await this.pecas.buscar(id));
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Atualiza nome/preço da peça' })
   async editar(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AtualizarPecaDto,
   ): Promise<PecaRespostaDto> {
     return apresentarPeca(await this.pecas.atualizar({ id, ...dto }));
@@ -59,14 +62,14 @@ export class PecasController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove uma peça (soft delete)' })
-  async excluir(@Param('id') id: string): Promise<void> {
+  async excluir(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.pecas.remover(id);
   }
 
   @Patch(':id/estoque')
   @ApiOperation({ summary: 'Ajuste manual de saldo (entrada/saída)' })
   async ajustarEstoque(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AjusteEstoqueDto,
   ): Promise<PecaRespostaDto> {
     return apresentarPeca(await this.pecas.ajustarEstoque({ id, ...dto }));

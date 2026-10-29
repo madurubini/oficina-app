@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
   Put,
   UseGuards,
@@ -41,14 +42,16 @@ export class ClientesController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Detalha um cliente' })
-  async porId(@Param('id') id: string): Promise<ClienteRespostaDto> {
+  async porId(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<ClienteRespostaDto> {
     return apresentarCliente(await this.clientes.buscar(id));
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Atualiza dados de contato do cliente' })
   async atualizar(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AtualizarClienteDto,
   ): Promise<ClienteRespostaDto> {
     return apresentarCliente(await this.clientes.atualizar({ id, ...dto }));
@@ -57,7 +60,7 @@ export class ClientesController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove o cliente (soft delete)' })
-  async remover(@Param('id') id: string): Promise<void> {
+  async remover(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.clientes.remover(id);
   }
 }
