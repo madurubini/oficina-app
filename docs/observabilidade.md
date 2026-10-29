@@ -84,20 +84,29 @@ Para importar:
 
 ## Alertas
 
-Em **Alerts** → **Alert Policies** → **New alert policy** (`Oficina`), crie as condições com
-**NRQL**:
+Em **Alerts** → **Alert Policies** → **New alert policy** (`Oficina`), com **Issue creation
+preference** = **One issue per condition** (cada tipo de problema abre o próprio incidente), crie
+as condições com **NRQL**:
 
-| Condição | NRQL | Limite |
-|---|---|---|
-| Falha no processamento de OS | `SELECT count(*) FROM FalhaIntegracao` | acima de 0 em 1 minuto → crítico |
-| Erro 5xx na API | `SELECT count(*) FROM TransactionError WHERE appName LIKE 'oficina-api-%' AND numeric(http.statusCode) >= 500` | acima de 0 em 1 minuto → crítico |
-| API lenta | `SELECT percentile(duration, 95) FROM Transaction WHERE appName LIKE 'oficina-api-%'` | acima de 1 s por 5 minutos → aviso; acima de 2 s → crítico |
+| Condição | NRQL | Limite | Fecha sozinho |
+|---|---|---|---|
+| Falha no processamento de OS | `SELECT count(*) FROM FalhaIntegracao` | acima de 0 em 1 minuto → crítico | após 10 min sem sinal |
+| Erro 5xx na API | `SELECT count(*) FROM TransactionError WHERE appName LIKE 'oficina-api-%' AND numeric(http.statusCode) >= 500` | acima de 0 em 1 minuto → crítico | após 10 min sem sinal |
+| API lenta | `SELECT percentile(duration, 95) FROM Transaction WHERE appName LIKE 'oficina-api-%'` | acima de 1 s por 5 minutos → aviso; acima de 2 s → crítico | quando o p95 volta ao normal |
 
 O filtro de status no 5xx importa: a falha de notificação também fica registrada na transação
 (com resposta 200), e sem ele as duas condições disparariam juntas.
 
-Para receber o aviso, ligue a política a um destino em **Alerts** → **Destinations** (e-mail
-basta).
+**Fechamento automático.** As duas condições de contagem só recebem sinal quando o problema
+acontece. Sem ajuste, o incidente fica aberto por até 24 h, e as falhas seguintes entram nele
+sem gerar novo aviso. Em cada uma, em **Signal loss** → **Close open incidents after**, use
+**10 minutos** e deixe desmarcado **Open new "lost signal" incident** (sem tráfego, nada abre).
+Assim o incidente fecha 10 minutos depois da última falha e a próxima falha avisa de novo. O
+p95 não precisa disso: ele fecha quando a latência volta para baixo do limite.
+
+**Aviso por e-mail.** Crie o destino em **Alerts** → **Destinations** → **Email** e, em
+**Alerts** → **Workflows**, um workflow (`Oficina`) com o filtro **Policy = Oficina**
+apontando para esse destino. Sem o workflow o incidente abre, mas ninguém é avisado.
 
 ## Monitor de disponibilidade
 
@@ -120,6 +129,9 @@ kubectl set env deployment/oficina-api -n homolog SIMULAR_FALHA_NOTIFICACAO=true
 # Volta ao normal
 kubectl set env deployment/oficina-api -n homolog SIMULAR_FALHA_NOTIFICACAO-
 ```
+
+Em 1 a 2 minutos o incidente `Falha no processamento de OS` abre e o e-mail chega. Uns 10
+minutos depois de voltar ao normal, ele fecha sozinho e o teste pode ser repetido.
 
 ## Gerar movimento nos gráficos
 
