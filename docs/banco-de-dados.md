@@ -253,10 +253,10 @@ entram com usuário e senha. Não tem FK para outras tabelas.
 | 1 | **Um schema por ambiente** no mesmo database: `homolog` e `prod` (`DATABASE_URL` termina em `?schema=homolog` ou `?schema=prod`) | Separa os dados dos dois ambientes sem pagar duas instâncias RDS | Etapa 3 |
 | 2 | **Login do cliente pelo `documento`**: a Lambda busca `cliente` por `documento` com `tipoDocumento = 'CPF'` e `ativo = true` | Requisito de autenticação por CPF. O `UNIQUE` em `documento` já cria o índice, então a busca é direta, sem tabela nova | Etapas 4 e 5 |
 | 3 | **Usuário somente-leitura para a Lambda** (`oficina_auth`, com `GRANT SELECT ON <schema>.cliente`) ✅ | A Lambda só precisa ler o cliente. Com um usuário restrito, um problema na função não consegue alterar nem apagar dados (menor privilégio) | Etapa 5 |
-| 4 | **Índices para os dashboards**: `ordem_servico(criadoEm)` para "OS por dia" e `historico_status(status, em)` para "tempo médio por status" | As consultas dos dashboards agregam por data e por status; sem índice, varrem a tabela inteira | Etapa 6 |
+| 4 | ~~**Índices para os dashboards**: `ordem_servico(criadoEm)` para "OS por dia" e `historico_status(status, em)` para "tempo médio por status"~~ **Não necessário** | Previsto para quando os dashboards consultassem o banco. Eles acabaram lendo eventos do New Relic (ver abaixo) | Etapa 6 |
 
-O ajuste 4 será aplicado (no `prisma/schema.prisma` e em `docs/schema.prisma`) na etapa indicada;
-este documento registra a decisão.
+Clientes com CNPJ continuam existindo para abrir OS, mas não fazem login pela Lambda, porque o
+enunciado pede autenticação por CPF.
 
 ### Como o ajuste 3 foi implementado
 
@@ -278,5 +278,12 @@ pelo repositório `oficina-lambda-auth`.
 - **Resultado:** um papel só, com leitura na tabela `cliente` dos dois schemas. Qualquer
   `INSERT`, `UPDATE`, `DELETE` ou leitura de outra tabela é recusado pelo próprio Postgres.
 
-Clientes com CNPJ continuam existindo para abrir OS, mas não fazem login pela Lambda, porque o
-enunciado pede autenticação por CPF.
+### Por que o ajuste 4 não foi necessário
+
+Os dashboards da Etapa 6 não consultam o Postgres. A cada mudança de status, o app envia ao New
+Relic o evento `OrdemServicoStatus`, já com o tempo que a OS passou no status anterior, e os
+gráficos "OS por dia" e "tempo médio por status" são consultas NRQL sobre esses eventos (ver
+[`observabilidade.md`](observabilidade.md)). No banco, a única consulta agregada é o relatório
+`GET /relatorios/tempo-medio-execucao`, que filtra por `finalizadoEm`, coluna que nenhum dos dois
+índices cobriria. Eles não teriam uso e só deixariam as escritas um pouco mais caras. Se um
+relatório passar a agregar por `criadoEm` ou por status no Postgres, o ajuste volta a valer.
