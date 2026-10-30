@@ -61,3 +61,30 @@ cliente ativo e se valia introduzir mensageria entre as peças.
   produção real, o Load Balancer teria certificado (ou o Gateway usaria um VPC Link).
 - O token é conferido duas vezes (Authorizer e app). É de propósito: o Gateway barra quem não tem
   token válido, e o app decide o que cada papel pode fazer.
+
+## Evolução registrada — Load Balancer interno e VPC Link
+
+*Registrada em 2026-10-30, na revisão de código. Ainda não implementada.*
+
+**Problema.** O Service `type: LoadBalancer` cria um Load Balancer **público**. Quem descobrir o
+endereço `*.elb.amazonaws.com` chama o app direto, sem passar pelo Gateway: escapa do Authorizer
+e do limite de requisições. Não é falha de autenticação, porque o app confere o JWT de novo, mas
+as proteções do Gateway deixam de valer.
+
+**Evolução proposta.**
+1. Trocar o Load Balancer por um **NLB interno**, com anotações no Service:
+   ```yaml
+   metadata:
+     annotations:
+       service.beta.kubernetes.io/aws-load-balancer-type: nlb
+       service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+   ```
+2. Criar um **VPC Link** (`AWS::ApiGatewayV2::VpcLink`) nas subnets da VPC e mudar a integração
+   para `ConnectionType: VPC_LINK`, apontando para o listener do NLB. O VPC Link do HTTP API aceita
+   NLB e ALB, mas não o Classic Load Balancer de hoje.
+3. O pipeline do `oficina-lambda-auth` passa a ler o ARN do listener do NLB, em vez do endereço
+   público do Load Balancer.
+
+**Por que ainda não.** Muda o ③ (Service) e o ④ (template e pipeline) ao mesmo tempo, e só dá para
+validar com o Learner Lab ligado. Como o app confere o token por conta própria, o risco que fica é
+de abuso e custo, não de acesso indevido.
