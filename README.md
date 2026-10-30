@@ -4,23 +4,31 @@ Back-end do Sistema de Atendimento e Execução de Serviços de uma oficina mec�
 cadastro de clientes/veículos, **Ordem de Serviço** (diagnóstico → orçamento → execução →
 entrega), controle de **estoque de peças** e acompanhamento do cliente com login por CPF.
 
-**Stack:** TypeScript · NestJS 11 · PostgreSQL 16 + Prisma 5 · JWT · Swagger.
-**Infraestrutura:** Docker · AWS (EKS, ECR, RDS) · Kustomize · Terraform · GitHub Actions.
+**Stack:** TypeScript · Node.js 22 · NestJS 11 · PostgreSQL 16 + Prisma 5 · JWT · Swagger.
+**Infraestrutura:** Docker · AWS (API Gateway, Lambda, EKS, ECR, RDS) · Kustomize · Terraform ·
+AWS SAM · GitHub Actions · New Relic.
 
 ---
 
-## Entregáveis da Fase 2
+## Entregáveis da Fase 3
 
 | Item | Onde |
 |---|---|
-| Descrição da solução e objetivos desta fase | [Objetivos](#objetivos) |
-| Desenho da arquitetura — componentes da aplicação | [Arquitetura](#arquitetura) |
-| Desenho da arquitetura — infraestrutura provisionada | [Componentes](#componentes) |
-| Desenho da arquitetura — fluxo de deploy | [Fluxo de deploy](#fluxo-de-deploy) |
-| Instruções de execução local | [Rodando localmente](#rodando-localmente) |
-| Instruções de deploy (Fase 3: EKS) | [Infraestrutura (Fase 3)](#infraestrutura-fase-3) |
-| Collection completa das APIs | [Collection das APIs](#collection-das-apis) |
+| Propósito e objetivos | [Objetivos](#objetivos) |
+| Tecnologias | Linhas **Stack** e **Infraestrutura**, acima |
+| Como rodar (local e na nuvem) | [Rodando localmente](#rodando-localmente) · [Infraestrutura (Fase 3)](#infraestrutura-fase-3) |
+| Diagrama de componentes (nuvem, APIs, banco, monitoramento) | [`docs/arquitetura.md`, seção 7](docs/arquitetura.md#7-componentes-na-nuvem-fase-3) |
+| Diagramas de sequência (autenticação por CPF, abertura de OS) | [`docs/arquitetura.md`, seções 8 e 9](docs/arquitetura.md#8-sequência-autenticação-por-cpf) |
+| RFCs (nuvem, banco, autenticação) | [`docs/rfc/`](docs/rfc) |
+| ADRs | [`docs/adr/`](docs/adr) |
+| Justificativa do banco e diagrama ER | [`docs/banco-de-dados.md`](docs/banco-de-dados.md) |
+| Observabilidade (New Relic) | [`docs/observabilidade.md`](docs/observabilidade.md) |
+| Swagger e collection das APIs | [Collection das APIs](#collection-das-apis) |
 | Vídeo demonstrativo | [Vídeo demonstrativo](#vídeo-demonstrativo) |
+
+Os outros três repositórios da fase: [`oficina-infra-k8s`](https://github.com/madurubini/oficina-infra-k8s)
+(rede e cluster), [`oficina-infra-db`](https://github.com/madurubini/oficina-infra-db) (banco) e
+[`oficina-lambda-auth`](https://github.com/madurubini/oficina-lambda-auth) (API Gateway e Lambdas).
 
 ---
 
@@ -52,6 +60,15 @@ Na **Fase 2**, a mesma aplicação ganha a infraestrutura que a sustenta em esca
 - **Infraestrutura como código** com Terraform: namespace, segredos e banco de dados provisionados
   por comando, não à mão.
 - **CI/CD** no GitHub Actions: build, testes, imagem Docker e deploy verificado num cluster real.
+
+Na **Fase 3**, o sistema vai para a nuvem (AWS), dividido em 4 repositórios:
+
+- **API Gateway** como porta de entrada única, com **Lambda Authorizer** conferindo o JWT.
+- **Login do cliente por CPF** numa função serverless (Lambda `auth-cpf`), que devolve um JWT.
+- **EKS** com homologação e produção em namespaces separados, e **RDS PostgreSQL** gerenciado.
+- **Deploy automático** em homologação (`homolog`) e produção (`main`), com a `main` protegida.
+- **Observabilidade** no New Relic: APM, logs em JSON com `requestId`, eventos de negócio,
+  dashboard, alertas e monitor de uptime.
 
 ---
 
@@ -461,9 +478,14 @@ Ordem para subir: infra-k8s → infra-db → **oficina-app** → lambda-auth (pa
 
 ### Componentes
 
+O desenho completo da nuvem, com o API Gateway, as Lambdas e o New Relic, está na
+[seção 7 de `docs/arquitetura.md`](docs/arquitetura.md#7-componentes-na-nuvem-fase-3). O
+diagrama abaixo mostra só a parte que este repositório cria e publica: o que acontece depois que
+a requisição passa pelo Gateway.
+
 ```mermaid
 flowchart TB
-    usuario(["Cliente / Swagger"])
+    usuario(["API Gateway<br/><i>oficina-lambda-auth</i>"])
 
     subgraph aws["AWS (us-east-1)"]
         ecr[("<b>ECR</b> oficina-app<br/><i>imagem por commit</i>")]
@@ -562,6 +584,7 @@ execução do workflow.
 | `DB_PASSWORD` | Senha do RDS, a mesma do repo `oficina-infra-db` |
 | `JWT_SECRET` | Assinatura dos tokens; a mesma das Lambdas |
 | `NEW_RELIC_LICENSE_KEY` | License key (Ingest) do New Relic: vai para o Secret do app e para a integração Kubernetes |
+| `GESTOR_SENHA` | Senha do usuário `gestor` criado pelo seed; a mesma do `oficina-lambda-auth`, que a usa no smoke test |
 
 ### Secrets: de onde vem cada credencial
 
@@ -640,8 +663,10 @@ GitHub. O endereço do banco é lido do próprio RDS no momento do deploy, entã
 de um repositório para outro.
 
 **Service do tipo LoadBalancer.** O EKS cria um Load Balancer da AWS nas subnets públicas que o
-repo `oficina-infra-k8s` marcou. É o caminho mais curto para ter uma URL pública por ambiente; o
-API Gateway da Etapa de autenticação aponta para ela.
+repo `oficina-infra-k8s` marcou. É o caminho mais curto para ter uma URL por ambiente; o API Gateway
+do `oficina-lambda-auth` aponta para ela. Como esse Load Balancer é público, dá para chamar o app
+sem passar pelo Gateway; a troca por um Load Balancer interno com VPC Link está registrada como
+evolução no [ADR 0002](docs/adr/0002-padrao-de-comunicacao.md#evolução-registrada--load-balancer-interno-e-vpc-link).
 
 **Liveness sem banco, readiness com banco.** As duas sondas respondem a perguntas diferentes: a
 liveness decide se o pod é **reiniciado**; a readiness, se ele **recebe tráfego**. Se ambas
@@ -665,15 +690,20 @@ réplicas migrarem o mesmo banco ao mesmo tempo. O Job roda uma vez por deploy, 
 A collection completa é o **Swagger** publicado pela própria aplicação — gerado a partir dos
 decoradores nos controllers, então nunca fica defasado em relação ao código.
 
-| | Local | EKS (`make url` mostra o endereço) |
+| | Local | Nuvem, pelo API Gateway |
 |---|---|---|
-| Swagger UI | http://localhost:3000/api/docs | `http://<load-balancer>/api/docs` |
-| OpenAPI JSON | http://localhost:3000/api/docs-json | `http://<load-balancer>/api/docs-json` |
-| Health check | http://localhost:3000/api/v1/health | `http://<load-balancer>/api/v1/health` |
+| Swagger UI | http://localhost:3000/api/docs | `https://<id>.execute-api.us-east-1.amazonaws.com/api/docs` |
+| OpenAPI JSON | http://localhost:3000/api/docs-json | `https://<id>.execute-api.us-east-1.amazonaws.com/api/docs-json` |
+| Health check | http://localhost:3000/api/v1/health | `https://<id>.execute-api.us-east-1.amazonaws.com/api/v1/health` |
+
+A URL do Gateway de cada ambiente aparece no resumo da execução do pipeline do
+`oficina-lambda-auth` e muda a cada sessão do Learner Lab. Pelo Gateway, `/api/docs`, o login e o
+health são livres; as demais rotas passam pelo Authorizer.
 
 Pelo Swagger dá para autenticar e disparar as chamadas sem sair do navegador:
 
-1. `POST /auth/login` com `gestor` / `gestor123` → copie o `accessToken`;
+1. `POST /auth/login` com `gestor` e a senha (`gestor123` no ambiente local; na nuvem, o secret
+   `GESTOR_SENHA`) → copie o `accessToken`;
 2. clique em **Authorize**, cole o token e confirme;
 3. as rotas administrativas passam a responder. As de `/acompanhamento` pedem o token do
    cliente (login por CPF) no lugar do `accessToken`.
@@ -693,9 +723,12 @@ payloads e o princípio "comando automático não é rota".
 
 ## Vídeo demonstrativo
 
-🔗 **[Link do vídeo]** — *https://www.youtube.com/watch?si=QP-iADZR9Q7cpbh-&v=4WTo-nlOCAs&feature=youtu.be*
+**Fase 3:** *link a publicar após a gravação.* Mostra o login por CPF pelo Gateway, a rota
+protegida, os pipelines e o deploy nos dois ambientes, e o monitoramento ao vivo no New Relic.
 
-Demonstra, no ambiente em execução:
+**Fase 2:** 🔗 *https://www.youtube.com/watch?si=QP-iADZR9Q7cpbh-&v=4WTo-nlOCAs&feature=youtu.be*
+
+O vídeo da Fase 2 demonstra, no ambiente em execução:
 
 - **Deploy da aplicação** — `terraform apply` provisionando a plataforma e os manifestos
   aplicados no cluster;
