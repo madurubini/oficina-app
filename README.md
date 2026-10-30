@@ -196,6 +196,9 @@ uma em falta, para exercitar a cotação/encomenda):
 |----------|-------------|--------|
 | `gestor` | `gestor123` | GESTOR |
 
+A senha vem de `SEED_GESTOR_SENHA`; `gestor123` é o padrão do `docker-compose`, só para uso local.
+Na nuvem ela vem do secret `GESTOR_SENHA` do GitHub, e o seed não roda sem ela.
+
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auth/login \
   -H 'Content-Type: application/json' \
@@ -563,11 +566,11 @@ execução do workflow.
 ### Secrets: de onde vem cada credencial
 
 Nenhuma credencial fica em arquivo versionado. O Secret `oficina-secrets` (chaves `DATABASE_URL`,
-`JWT_SECRET` e `NEW_RELIC_LICENSE_KEY`) é **criado pelo pipeline** a cada deploy:
+`JWT_SECRET`, `NEW_RELIC_LICENSE_KEY` e `SEED_GESTOR_SENHA`) é **criado pelo pipeline** a cada deploy:
 
 ```mermaid
 flowchart LR
-    gh["Secrets do GitHub<br/><i>DB_PASSWORD · JWT_SECRET</i>"] --> wf["workflow<br/><i>monta a DATABASE_URL</i>"]
+    gh["Secrets do GitHub<br/><i>DB_PASSWORD · JWT_SECRET · GESTOR_SENHA</i>"] --> wf["workflow<br/><i>monta a DATABASE_URL</i>"]
     rds["aws rds describe-db-instances<br/><i>endereço · usuário · banco</i>"] --> wf
     wf -->|kubectl apply| s["Secret oficina-secrets<br/><i>no namespace</i>"]
     s -->|envFrom| p["Pod da API<br/><i>process.env.DATABASE_URL</i>"]
