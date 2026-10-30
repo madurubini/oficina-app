@@ -32,15 +32,13 @@ export class AutenticarUsuario {
   async executar(entrada: EntradaAutenticarUsuario): Promise<TokenGerado> {
     const usuario = await this.usuarios.buscarPorUsername(entrada.username);
 
-    if (!usuario || !usuario.ativo) {
-      throw new ErroNaoAutenticado('Credenciais inválidas.');
-    }
-
+    // A senha é comparada sempre, mesmo sem usuário: assim o tempo de resposta
+    // não revela quais usernames existem.
     const senhaConfere = await this.hash.comparar(
       entrada.senha,
-      usuario.senhaHash,
+      usuario?.senhaHash ?? null,
     );
-    if (!senhaConfere) {
+    if (!usuario || !usuario.ativo || !senhaConfere) {
       throw new ErroNaoAutenticado('Credenciais inválidas.');
     }
 
