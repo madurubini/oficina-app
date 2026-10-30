@@ -52,3 +52,24 @@ Usar o **HorizontalPodAutoscaler** (`autoscaling/v2`), definido em `k8s/base/hpa
   disputam os mesmos 2 nós; o node group só vai a 3 se o tamanho for mudado no Terraform.
 - O HPA depende dos `requests` declarados no `Deployment`. Mudar `requests` muda quando ele escala.
 - Sem o metrics-server o HPA fica sem dado e não escala (aparece `<unknown>` no `kubectl get hpa`).
+
+## Evolução registrada — paginação nas listagens
+
+*Registrada em 2026-10-30, na revisão de código. Ainda não implementada.*
+
+**Problema.** As listagens (`GET /ordens-servico`, `/ordens-servico/fila`, `/clientes`, `/pecas`,
+`/servicos` e os veículos de um cliente) devolvem todos os registros. A de ordens de serviço ainda
+traz cada OS completa, com histórico, orçamentos e linhas. O tempo de resposta e a memória do pod
+crescem sem limite junto com os dados, e o HPA, que também escala por memória, pode criar pods
+por causa de uma consulta grande e não por carga de verdade.
+
+**Evolução proposta.**
+- Parâmetros `limite` (padrão 20, máximo 100) e `deslocamento` nas listagens, validados no DTO, e
+  `take`/`skip` no `findMany` do Prisma.
+- Na lista de OSs, um `include` enxuto (sem as linhas do orçamento). O detalhe completo continua
+  em `GET /ordens-servico/{id}`.
+- A resposta passa a trazer o total (`{ itens, total }`), o que muda o contrato da API: atualizar
+  `docs/contrato-api.md` e avisar quem consome.
+
+**Por que ainda não.** Muda o formato das respostas de várias rotas. Com o volume de dados do
+projeto, as listagens ainda respondem rápido.

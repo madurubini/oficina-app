@@ -13,3 +13,14 @@ passa a apontar para ele.
 | [0005](0005-rede-sem-nat-gateway.md) | Rede só com subnets públicas, sem NAT Gateway | 3 |
 | [0006](0006-aws-sam-para-as-lambdas.md) | AWS SAM para o Gateway e as Lambdas | 3 |
 | [0007](0007-observabilidade-com-new-relic.md) | Observabilidade com New Relic | 3 |
+
+## Evoluções registradas
+
+Problemas encontrados na revisão de código de 2026-10-30, com a correção proposta, mas ainda não
+implementados. Cada um está no fim do ADR relacionado.
+
+| ADR | Evolução |
+|---|---|
+| [0001](0001-escolha-do-banco-de-dados.md#evolução-registrada--número-da-os-por-sequence-2026-10-30) | Número da OS gerado por sequence do PostgreSQL, sem corrida |
+| [0002](0002-padrao-de-comunicacao.md#evolução-registrada--load-balancer-interno-e-vpc-link) | Load Balancer interno + VPC Link, para ninguém contornar o Gateway |
+| [0003](0003-escalabilidade-com-hpa.md#evolução-registrada--paginação-nas-listagens) | Paginação nas listagens |
