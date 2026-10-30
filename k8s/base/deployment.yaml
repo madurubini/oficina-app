@@ -21,6 +21,9 @@ spec:
       labels:
         app.kubernetes.io/name: oficina-api
     spec:
+      # Tempo entre o SIGTERM e o encerramento forçado: cobre o preStop e as
+      # requisições que ainda estão em andamento.
+      terminationGracePeriodSeconds: 30
       containers:
         - name: api
           # Nome lógico: cada overlay troca pelo endereço do ECR com a tag do
@@ -34,6 +37,13 @@ spec:
                 name: oficina-config
             - secretRef:
                 name: oficina-secrets
+          # Ao remover o pod (rollout ou HPA descendo), o Kubernetes o tira do
+          # Service ao mesmo tempo que manda o SIGTERM. A pausa dá tempo de o Load
+          # Balancer parar de mandar requisições antes de a API começar a fechar.
+          lifecycle:
+            preStop:
+              exec:
+                command: ['sleep', '10']
           startupProbe:
             httpGet:
               path: /api/v1/health/live

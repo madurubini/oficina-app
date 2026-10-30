@@ -59,10 +59,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Preparar Node 20
+      - name: Preparar Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Instalar dependências
@@ -131,7 +131,14 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          GESTOR_SENHA: ${{ secrets.GESTOR_SENHA }}
         run: |
+          # Sem o secret, o seed pararia o Job de migrações: falha aqui, com a causa clara.
+          if [ -z "$GESTOR_SENHA" ]; then
+            echo "::error::Cadastre o secret GESTOR_SENHA (senha do gestor criado pelo seed)."
+            exit 1
+          fi
+
           read -r DB_HOST DB_PORTA DB_USUARIO DB_NOME <<< "$(aws rds describe-db-instances \
             --db-instance-identifier "$RDS_IDENTIFICADOR" \
             --query 'DBInstances[0].[Endpoint.Address,Endpoint.Port,MasterUsername,DBName]' \
@@ -147,6 +154,7 @@ jobs:
             --from-literal=DATABASE_URL="$DATABASE_URL" \
             --from-literal=JWT_SECRET="$JWT_SECRET" \
             --from-literal=NEW_RELIC_LICENSE_KEY="$NEW_RELIC_LICENSE_KEY" \
+            --from-literal=SEED_GESTOR_SENHA="$GESTOR_SENHA" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       # Integração Kubernetes do New Relic: CPU/memória de nós e pods, estado
@@ -196,6 +204,8 @@ jobs:
       # Na primeira vez o Load Balancer leva alguns minutos para ganhar endereço
       # e o DNS dele mais um pouco para propagar; daí as esperas em laço.
       - name: Smoke test pelo Load Balancer
+        env:
+          GESTOR_SENHA: ${{ secrets.GESTOR_SENHA }}
         run: |
           for i in $(seq 1 30); do
             HOST=$(kubectl get svc oficina-api -n "$NAMESPACE" \
@@ -217,7 +227,7 @@ jobs:
 
           curl -fsS -X POST "$URL/api/v1/auth/login" \
             -H 'Content-Type: application/json' \
-            -d '{"username":"gestor","senha":"gestor123"}' \
+            -d "$(jq -n --arg s "$GESTOR_SENHA" '{username: "gestor", senha: $s}')" \
             | grep -q accessToken
 
           {

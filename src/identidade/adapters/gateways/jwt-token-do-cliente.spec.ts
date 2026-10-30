@@ -28,6 +28,14 @@ describe('JwtTokenDoCliente', () => {
     await expect(tokens.verificar(token)).resolves.toBeNull();
   });
 
+  it('recusa token com outro algoritmo, mesmo com o segredo certo', async () => {
+    const token = await jwt.signAsync(
+      { sub: 'cli-1', papel: 'CLIENTE' },
+      { algorithm: 'HS512' },
+    );
+    await expect(tokens.verificar(token)).resolves.toBeNull();
+  });
+
   it('recusa token expirado', async () => {
     const token = await jwt.signAsync(
       { sub: 'cli-1', papel: 'CLIENTE' },

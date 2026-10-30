@@ -53,7 +53,8 @@ describe('AutenticarUsuario', () => {
     await expect(
       usecase.executar({ username: 'fantasma', senha: 'x' }),
     ).rejects.toBeInstanceOf(ErroNaoAutenticado);
-    expect(hash.comparar).not.toHaveBeenCalled();
+    // Compara mesmo assim (sem hash): mesmo tempo de resposta.
+    expect(hash.comparar).toHaveBeenCalledWith('x', null);
     expect(token.gerar).not.toHaveBeenCalled();
   });
 
@@ -66,7 +67,7 @@ describe('AutenticarUsuario', () => {
     await expect(
       usecase.executar({ username: 'gestor', senha: 'gestor123' }),
     ).rejects.toBeInstanceOf(ErroNaoAutenticado);
-    expect(hash.comparar).not.toHaveBeenCalled();
+    expect(token.gerar).not.toHaveBeenCalled();
   });
 
   it('rejeita quando a senha não confere', async () => {
