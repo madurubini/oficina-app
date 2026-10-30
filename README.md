@@ -713,6 +713,7 @@ Demonstra, no ambiente em execução:
 | [`docs/contrato-api.md`](docs/contrato-api.md) | Endpoints, payloads e o princípio "comando automático não é rota". |
 | [`docs/linguagem-ubiqua.md`](docs/linguagem-ubiqua.md) | Vocabulário do domínio (Event Storming). |
 | [`docs/schema.prisma`](docs/schema.prisma) | Cópia documental do schema de dados. |
+| [`docs/rfc/`](docs/rfc) | Propostas (RFCs): escolha da nuvem, do banco e da estratégia de autenticação. |
 | [`docs/adr/`](docs/adr) | Decisões de arquitetura (ADRs): banco, comunicação, HPA, ambientes, rede, SAM e New Relic. |
 | [`docs/banco-de-dados.md`](docs/banco-de-dados.md) | Justificativa do banco e diagrama ER. |
 | [`docs/observabilidade.md`](docs/observabilidade.md) | New Relic: requestId, eventos de negócio, dashboard, alertas e monitor. |
