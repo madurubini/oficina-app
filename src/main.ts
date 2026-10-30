@@ -67,6 +67,11 @@ async function bootstrap(): Promise<void> {
   const documento = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, documento);
 
+  // No SIGTERM (rollout ou HPA descendo), o Nest para de aceitar conexões,
+  // termina as requisições em andamento e roda os onModuleDestroy (o Prisma
+  // fecha as conexões com o banco). Sem isso o processo morre na hora.
+  app.enableShutdownHooks();
+
   const porta = process.env.PORT ? Number(process.env.PORT) : 3000;
   await app.listen(porta);
   const logger = app.get(Logger);

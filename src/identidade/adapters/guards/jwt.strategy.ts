@@ -37,6 +37,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: segredo,
+      // Só o algoritmo com que o app assina: impede a troca por outro.
+      algorithms: ['HS256'],
     });
   }
 

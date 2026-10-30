@@ -19,7 +19,7 @@ banco. `detalhes` é sempre a chave presente: `null` quando não há o que detal
 
 | Código | HTTP | Quando acontece | `detalhes` |
 |---|---|---|---|
-| `VALIDACAO` | 400 | Formato de entrada inválido (DTO/query) ou regra do caso de uso (ex.: período com início posterior ao fim). | Lista de mensagens do validador, ou o objeto do erro de domínio. |
+| `VALIDACAO` | 400 | Formato de entrada inválido (DTO/query, ou id da rota que não é UUID) ou regra do caso de uso (ex.: período com início posterior ao fim). | Lista de mensagens do validador, ou o objeto do erro de domínio. |
 | `NAO_AUTENTICADO` | 401 | Sem credencial, JWT inválido/expirado, token do cliente ausente ou inválido. | `null`. |
 | `NAO_AUTORIZADO` | 403 | Autenticado, mas sem permissão: papel insuficiente (`@Papeis`), token de cliente em rota administrativa ou OS de **outro** cliente. | Papéis exigidos, quando for o caso. |
 | `NAO_ENCONTRADO` | 404 | Recurso inexistente ou inativo. | Identificador procurado. |

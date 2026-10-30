@@ -5,12 +5,21 @@ const prisma = new PrismaClient();
 
 async function main() {
   const username = 'gestor';
-  const senhaPlana = 'gestor123';
+  // A senha vem do ambiente: no cluster, do Secret criado pelo pipeline; no
+  // docker-compose, de um padrão só para desenvolvimento. Sem ela o seed para,
+  // para nunca subir um gestor com senha conhecida.
+  const senhaPlana = process.env.SEED_GESTOR_SENHA;
+  if (!senhaPlana) {
+    throw new Error(
+      'SEED_GESTOR_SENHA não definida: o gestor não é criado sem senha.',
+    );
+  }
   const senhaHash = await bcrypt.hash(senhaPlana, 10);
 
+  // O update regrava a senha: trocar o secret e fazer deploy troca a senha.
   await prisma.usuario.upsert({
     where: { username },
-    update: {},
+    update: { senhaHash },
     create: {
       username,
       senhaHash,
@@ -61,7 +70,7 @@ async function main() {
 
   // eslint-disable-next-line no-console
   console.log(
-    `Seed concluído. Usuário="${username}" senha="${senhaPlana}" (GESTOR); 2 serviços e 2 peças de exemplo.`,
+    `Seed concluído. Usuário="${username}" (GESTOR); 2 serviços e 2 peças de exemplo.`,
   );
 }
 
