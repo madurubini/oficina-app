@@ -706,11 +706,11 @@ Demonstra, no ambiente em execução:
 
 | Documento | Conteúdo |
 |---|---|
-| [`docs/arquitetura.md`](docs/arquitetura.md) | Os diagramas: contexto, módulos, camadas, ciclo de vida da OS e fluxos. |
+| [`docs/arquitetura.md`](docs/arquitetura.md) | Os diagramas: contexto, módulos, camadas, ciclo de vida da OS, fluxos, componentes na nuvem e sequências da Fase 3. |
 | [`docs/contrato-api.md`](docs/contrato-api.md) | Endpoints, payloads e o princípio "comando automático não é rota". |
 | [`docs/linguagem-ubiqua.md`](docs/linguagem-ubiqua.md) | Vocabulário do domínio (Event Storming). |
 | [`docs/schema.prisma`](docs/schema.prisma) | Cópia documental do schema de dados. |
-| [`docs/adr/`](docs/adr) | Decisões da Fase 1 (ex.: escolha do banco). |
+| [`docs/adr/`](docs/adr) | Decisões de arquitetura (ADRs): banco, comunicação, HPA, ambientes, rede, SAM e New Relic. |
 | [`docs/banco-de-dados.md`](docs/banco-de-dados.md) | Justificativa do banco e diagrama ER. |
 | [`docs/observabilidade.md`](docs/observabilidade.md) | New Relic: requestId, eventos de negócio, dashboard, alertas e monitor. |
 | [`k8s/`](k8s) | Manifestos da aplicação, comentados recurso a recurso. |
