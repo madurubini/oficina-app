@@ -13,6 +13,8 @@ Sumário:
 5. [Fluxo principal ponta a ponta](#5-fluxo-principal-ponta-a-ponta)
 6. [O desvio "peça em falta"](#6-o-desvio-peça-em-falta)
 7. [Componentes na nuvem (Fase 3)](#7-componentes-na-nuvem-fase-3)
+8. [Sequência: autenticação por CPF](#8-sequência-autenticação-por-cpf)
+9. [Sequência: abertura de OS na nuvem](#9-sequência-abertura-de-os-na-nuvem)
 
 ---
 
@@ -257,7 +259,7 @@ sequenceDiagram
     Note over OS: preço congelado no orçamento<br/>peça sem saldo → EM_COTACAO
     OS-->>API: Aguardando aprovação + orçamento
     OS--)Notif: orcamento-enviado
-    Notif--)Cliente: link de acompanhamento (token da OS)
+    Notif--)Cliente: aviso "entre com seu CPF para aprovar"
 
     Cliente->>API: POST /acompanhamento/{os}/orcamentos/{orc}/resposta
     API->>OS: AprovarOrcamento
@@ -421,6 +423,120 @@ flowchart TB
 - **Um cluster e um banco para os dois ambientes.** Homolog e prod ficam separados por namespace
   no EKS e por schema no RDS, sem dobrar o custo. Cada ambiente tem sua stack do Gateway, seu Load
   Balancer e seus dados.
+
+---
+
+## 8. Sequência: autenticação por CPF
+
+O cliente troca o CPF por um token e usa esse token para acompanhar as OSs dele. São duas
+barreiras: o Gateway confere se o token é legítimo, e o app confere se ele é **de cliente** e se a
+OS é **dele**.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Cliente
+    participant GW as API Gateway
+    participant Cpf as λ auth-cpf
+    participant Authz as λ Authorizer
+    participant App as oficina-api (EKS)
+    participant DB as RDS
+
+    rect rgba(74, 111, 165, 0.08)
+    Note over Cliente,DB: 1. Login: CPF → token
+    Cliente->>GW: POST /auth/cpf { cpf }
+    GW->>Cpf: invoca
+    Cpf->>Cpf: valida formato e dígitos do CPF
+    alt CPF inválido
+        Cpf-->>Cliente: 400 VALIDACAO
+    end
+    Cpf->>DB: SELECT id FROM cliente<br/>WHERE documento, tipoDocumento = 'CPF', ativo<br/>(usuário oficina_auth, só leitura)
+    DB-->>Cpf: cliente ou nada
+    alt não cadastrado ou inativo
+        Cpf-->>Cliente: 401 NAO_AUTENTICADO<br/>(mesma resposta para os dois casos)
+    end
+    Cpf->>Cpf: assina o JWT HS256<br/>{ sub: clienteId, papel: 'CLIENTE' }, 1 h
+    Cpf-->>Cliente: 200 { accessToken, expiresIn }
+    end
+
+    rect rgba(74, 138, 95, 0.08)
+    Note over Cliente,DB: 2. Uso: token → rota protegida
+    Cliente->>GW: GET /api/v1/acompanhamento<br/>Authorization: Bearer token
+    alt sem o cabeçalho Authorization
+        GW-->>Cliente: 401 (o Gateway responde sozinho)
+    end
+    GW->>Authz: o token é legítimo?
+    Authz->>Authz: confere assinatura (JWT_SECRET) e validade
+    alt token inválido ou expirado
+        Authz-->>GW: isAuthorized: false
+        GW-->>Cliente: 403
+    end
+    Authz-->>GW: isAuthorized: true
+    GW->>App: HTTP_PROXY pelo Load Balancer<br/>x-request-id = id da requisição no Gateway
+    App->>App: ClienteGuard: o token é de cliente?<br/>(token de operador aqui → 401)
+    App->>DB: OSs do cliente (sub do token)
+    DB-->>App: lista
+    App-->>Cliente: 200 [ OSs do cliente ]
+    end
+```
+
+- **Por que o app confere o token de novo, se o Gateway já conferiu?** O Authorizer só diz se o
+  token é legítimo, e aceita tanto o do operador quanto o do cliente. Quem sabe o que cada papel
+  pode fazer é o app: token de cliente em rota administrativa recebe 403, e a OS de **outro**
+  cliente também (a posse é conferida em `ConsultarOrdemServico.buscarDoCliente`).
+- **Por que "não cadastrado" e "inativo" dão o mesmo 401?** Para a rota não servir para descobrir
+  quais CPFs são clientes da oficina.
+- O operador faz o mesmo caminho da parte 2, mas pega o token em `POST /api/v1/auth/login`, rota
+  livre no Gateway que vai direto para o app.
+
+---
+
+## 9. Sequência: abertura de OS na nuvem
+
+O mesmo caso de uso da Fase 2 (`AbrirOrdemServico`), agora com o caminho de rede da Fase 3 e o
+registro no New Relic.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Recepcao as Recepcionista
+    participant GW as API Gateway
+    participant Authz as λ Authorizer
+    participant App as oficina-api (EKS)
+    participant CV as clientes-veiculos
+    participant DB as RDS
+    participant NR as New Relic
+
+    Recepcao->>GW: POST /api/v1/ordens-servico<br/>{ clienteId, veiculoId, problemaRelatado }<br/>Authorization: Bearer token do operador
+    GW->>Authz: o token é legítimo?
+    Authz-->>GW: isAuthorized: true
+    GW->>App: HTTP_PROXY pelo Load Balancer<br/>x-request-id = id da requisição no Gateway
+    App->>App: JwtAuthGuard: token de operador<br/>ValidationPipe: corpo do DTO
+    App->>CV: o cliente existe? (porta pública)
+    CV->>DB: SELECT cliente
+    alt cliente não existe
+        App-->>Recepcao: 404 NAO_ENCONTRADO
+    end
+    App->>CV: o veículo é desse cliente? (porta pública)
+    CV->>DB: SELECT veiculo
+    alt veículo de outro cliente
+        App-->>Recepcao: 400 VALIDACAO
+    end
+    App->>DB: próximo número + INSERT ordem_servico<br/>(status Recebida, histórico)
+    App--)App: evento os-aberta (event bus in-process)
+    App--)NR: OrdemServicoStatus { de: '', para: RECEBIDA }
+    App-->>Recepcao: 201 { id, numero, status: Recebida }
+    App--)NR: transação no APM + logs JSON<br/>com o mesmo requestId
+```
+
+- **O `x-request-id` liga as pontas.** O Gateway manda o id da requisição dele no cabeçalho; o app
+  usa esse mesmo valor nos logs JSON e na transação do APM. Com o id que aparece no Gateway dá para
+  achar, no New Relic, tudo o que aconteceu dentro do app naquela chamada.
+- **O New Relic não é chamado na hora.** O agente APM junta transação, logs e eventos e envia em
+  lote, em segundo plano. Se o New Relic estiver fora do ar, a OS abre do mesmo jeito.
+- **Os dashboards leem o evento, não o banco.** O `OrdemServicoStatus` alimenta "OS por dia" e
+  "tempo médio por status" (ver [`observabilidade.md`](observabilidade.md)). Cada mudança de status
+  seguinte (diagnóstico, aprovação, execução...) gera mais um evento igual.
 
 ---
 
