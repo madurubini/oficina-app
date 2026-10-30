@@ -49,7 +49,7 @@ services:
     ports:
       - '${APP_PORT:-3000}:3000'
     healthcheck:
-      # Usa o fetch nativo do Node 20 (a imagem slim não tem curl/wget).
+      # Usa o fetch nativo do Node 22 (a imagem slim não tem curl/wget).
       test:
         [
           'CMD',

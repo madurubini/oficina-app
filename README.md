@@ -345,7 +345,7 @@ as de `/acompanhamento` usam o **token do cliente**, do login por CPF.
 
 ## Testes
 
-Rodar a suíte exige **Node 20+** na máquina (o `package.json` pede `engines.node >= 20`).
+Rodar a suíte exige **Node 22+** na máquina (o `package.json` pede `engines.node >= 22`).
 
 ```bash
 npm test          # unitários (entities + use-cases) — sem banco, sem HTTP
