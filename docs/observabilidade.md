@@ -97,6 +97,12 @@ as condições com **NRQL**:
 O filtro de status no 5xx importa: a falha de notificação também fica registrada na transação
 (com resposta 200), e sem ele as duas condições disparariam juntas.
 
+**Agregação por tempo (Event timer).** Nas duas condições de contagem, em **Fine-tune advanced
+signal settings**, use **Streaming method = Event timer** com **60 segundos**. O padrão (Event
+flow) só fecha a janela de 1 minuto quando chega o próximo evento: como a falha é rara, a janela
+fica esperando e o alerta não dispara. Com o Event timer, a janela fecha 60 segundos depois do
+último evento e o incidente abre em 1 a 2 minutos.
+
 **Fechamento automático.** As duas condições de contagem só recebem sinal quando o problema
 acontece. Sem ajuste, o incidente fica aberto por até 24 h, e as falhas seguintes entram nele
 sem gerar novo aviso. Em cada uma, em **Signal loss** → **Close open incidents after**, use
