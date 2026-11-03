@@ -352,6 +352,15 @@ describe('Fluxo da OS (e2e — integração com Postgres)', () => {
       .get(`${base}/ordens-servico?status=INVENTADO`)
       .set(auth)
       .expect(400);
+
+    // Id que não é UUID na rota: antes o Prisma falhava ao converter e virava 500.
+    const idInvalido = await http
+      .post(`${base}/clientes/null/veiculos`)
+      .set(auth)
+      .send({ placa: 'ABC1D23', marca: 'Fiat', modelo: 'Uno', ano: 2015 })
+      .expect(400);
+    expect(idInvalido.body.erro.codigo).toBe('VALIDACAO');
+    await http.get(`${base}/ordens-servico/abacaxi`).set(auth).expect(400);
   }, 30000);
 
   it('cadastro duplicado responde 409 mesmo quando quem barra é o banco', async () => {

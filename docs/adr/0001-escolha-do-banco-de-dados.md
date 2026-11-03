@@ -105,3 +105,28 @@ cluster EKS e das Lambdas). Homologação e produção ficam em **schemas** sepa
 A justificativa formal da escolha, o diagrama ER, a explicação dos relacionamentos e os ajustes no
 modelo relacional estão em [`docs/banco-de-dados.md`](../banco-de-dados.md). A infraestrutura está
 no repositório [`oficina-infra-db`](https://github.com/madurubini/oficina-infra-db).
+
+## Evolução registrada — número da OS por sequence (2026-10-30)
+
+*Registrada na revisão de código. Ainda não implementada.*
+
+**Problema.** O número da OS (`OS-000123`) é calculado com `count() + 1` antes do `INSERT`
+(`prisma-ordem-servico.repositorio.ts`, `proximoNumero`). Se duas OSs forem abertas ao mesmo
+tempo, as duas calculam o mesmo número. Como `numero` é `@unique`, nada se duplica, mas a segunda
+abertura recebe **409** sem ter feito nada errado. Com mais pods no ar (HPA), isso fica mais
+provável. E, se uma OS for apagada um dia, os números passam a se repetir.
+
+**Evolução proposta.** Deixar o próprio PostgreSQL gerar o número com uma **sequence**, que é
+atômica e não tem corrida:
+```prisma
+model OrdemServico {
+  sequencial Int    @unique @default(autoincrement())
+  numero     String @unique
+}
+```
+O repositório insere a OS, recebe o `sequencial` gerado e monta o `numero` a partir dele (ou
+lê `nextval()` antes do `INSERT`). A migration precisa preencher o `sequencial` das OSs que já
+existem a partir do número delas e ajustar a sequence para continuar do maior valor.
+
+**Por que ainda não.** Exige migration com preenchimento dos dados atuais, e a corrida só
+aparece com aberturas simultâneas, raras no uso do projeto.

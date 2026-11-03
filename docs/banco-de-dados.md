@@ -252,11 +252,38 @@ entram com usuário e senha. Não tem FK para outras tabelas.
 |---|---|---|---|
 | 1 | **Um schema por ambiente** no mesmo database: `homolog` e `prod` (`DATABASE_URL` termina em `?schema=homolog` ou `?schema=prod`) | Separa os dados dos dois ambientes sem pagar duas instâncias RDS | Etapa 3 |
 | 2 | **Login do cliente pelo `documento`**: a Lambda busca `cliente` por `documento` com `tipoDocumento = 'CPF'` e `ativo = true` | Requisito de autenticação por CPF. O `UNIQUE` em `documento` já cria o índice, então a busca é direta, sem tabela nova | Etapas 4 e 5 |
-| 3 | **Usuário somente-leitura para a Lambda** (`GRANT SELECT ON cliente`) | A Lambda só precisa ler o cliente. Com um usuário restrito, um problema na função não consegue alterar nem apagar dados (menor privilégio) | Etapa 5 |
-| 4 | **Índices para os dashboards**: `ordem_servico(criadoEm)` para "OS por dia" e `historico_status(status, em)` para "tempo médio por status" | As consultas dos dashboards agregam por data e por status; sem índice, varrem a tabela inteira | Etapa 6 |
-
-Os ajustes 3 e 4 serão aplicados (no `prisma/schema.prisma` e em `docs/schema.prisma`) nas etapas
-indicadas; este documento registra a decisão.
+| 3 | **Usuário somente-leitura para a Lambda** (`oficina_auth`, com `GRANT SELECT ON <schema>.cliente`) ✅ | A Lambda só precisa ler o cliente. Com um usuário restrito, um problema na função não consegue alterar nem apagar dados (menor privilégio) | Etapa 5 |
+| 4 | ~~**Índices para os dashboards**: `ordem_servico(criadoEm)` para "OS por dia" e `historico_status(status, em)` para "tempo médio por status"~~ **Não necessário** | Previsto para quando os dashboards consultassem o banco. Eles acabaram lendo eventos do New Relic (ver abaixo) | Etapa 6 |
 
 Clientes com CNPJ continuam existindo para abrir OS, mas não fazem login pela Lambda, porque o
 enunciado pede autenticação por CPF.
+
+### Como o ajuste 3 foi implementado
+
+O usuário não faz parte do modelo (não está no `schema.prisma`): é um papel do Postgres, criado
+pelo repositório `oficina-lambda-auth`.
+
+- **Quem cria:** o pipeline do `oficina-lambda-auth`, a cada deploy, roda o Job
+  [`k8s/usuario-leitura.yaml`](https://github.com/madurubini/oficina-lambda-auth/blob/main/k8s/usuario-leitura.yaml)
+  no namespace do ambiente. O Job roda dentro do cluster porque o runner do GitHub não alcança o
+  RDS, que só aceita conexões da VPC. Ele entra com o usuário administrador (`DB_PASSWORD`) só
+  para isso.
+- **O que o Job faz** (idempotente, pode rodar de novo sem erro):
+  1. cria o papel `oficina_auth` com `LOGIN`, se ainda não existir, e (re)define a senha com o
+     secret `DB_PASSWORD_LEITURA`;
+  2. `GRANT USAGE ON SCHEMA <ambiente>`, para enxergar o schema do ambiente (`homolog` ou `prod`);
+  3. `GRANT SELECT ON <ambiente>.cliente`, e nada mais.
+- **Quem usa:** a Lambda `auth-cpf` conecta como `oficina_auth`. A senha chega como parâmetro
+  `NoEcho` do SAM, que vira variável de ambiente da função.
+- **Resultado:** um papel só, com leitura na tabela `cliente` dos dois schemas. Qualquer
+  `INSERT`, `UPDATE`, `DELETE` ou leitura de outra tabela é recusado pelo próprio Postgres.
+
+### Por que o ajuste 4 não foi necessário
+
+Os dashboards da Etapa 6 não consultam o Postgres. A cada mudança de status, o app envia ao New
+Relic o evento `OrdemServicoStatus`, já com o tempo que a OS passou no status anterior, e os
+gráficos "OS por dia" e "tempo médio por status" são consultas NRQL sobre esses eventos (ver
+[`observabilidade.md`](observabilidade.md)). No banco, a única consulta agregada é o relatório
+`GET /relatorios/tempo-medio-execucao`, que filtra por `finalizadoEm`, coluna que nenhum dos dois
+índices cobriria. Eles não teriam uso e só deixariam as escritas um pouco mais caras. Se um
+relatório passar a agregar por `criadoEm` ou por status no Postgres, o ajuste volta a valer.

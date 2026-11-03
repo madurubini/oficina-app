@@ -1,5 +1,5 @@
 # ─────────────── Estágio 1: build ───────────────
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 
 # openssl é exigido pelo engine do Prisma
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
@@ -17,7 +17,7 @@ RUN npx tsc prisma/seed.ts --outDir dist/prisma --module commonjs \
     --target ES2021 --esModuleInterop --skipLibCheck --resolveJsonModule
 
 # ─────────────── Estágio 2: runtime ───────────────
-FROM node:20-slim AS runner
+FROM node:22-slim AS runner
 
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 

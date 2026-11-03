@@ -37,6 +37,8 @@ services:
       NODE_ENV: production
       JWT_SECRET: ${JWT_SECRET:-segredo-de-desenvolvimento-nao-use-em-producao}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-3600s}
+      # Senha do gestor criado pelo seed. O padrão vale só no ambiente local.
+      SEED_GESTOR_SENHA: ${SEED_GESTOR_SENHA:-gestor123}
       # New Relic desligado por padrão. Para testar com a sua conta, crie um
       # .env (fora do git) com NEW_RELIC_ENABLED=true e NEW_RELIC_LICENSE_KEY.
       NEW_RELIC_ENABLED: ${NEW_RELIC_ENABLED:-false}
@@ -47,7 +49,7 @@ services:
     ports:
       - '${APP_PORT:-3000}:3000'
     healthcheck:
-      # Usa o fetch nativo do Node 20 (a imagem slim não tem curl/wget).
+      # Usa o fetch nativo do Node 22 (a imagem slim não tem curl/wget).
       test:
         [
           'CMD',

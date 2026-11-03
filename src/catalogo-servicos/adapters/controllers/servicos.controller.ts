@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
   Put,
   UseGuards,
@@ -41,14 +42,16 @@ export class ServicosController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Detalha um serviço' })
-  async porId(@Param('id') id: string): Promise<ServicoRespostaDto> {
+  async porId(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<ServicoRespostaDto> {
     return apresentarServico(await this.servicos.buscar(id));
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Atualiza um serviço' })
   async editar(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AtualizarServicoDto,
   ): Promise<ServicoRespostaDto> {
     return apresentarServico(await this.servicos.atualizar({ id, ...dto }));
@@ -57,7 +60,7 @@ export class ServicosController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove um serviço (soft delete)' })
-  async excluir(@Param('id') id: string): Promise<void> {
+  async excluir(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.servicos.remover(id);
   }
 }

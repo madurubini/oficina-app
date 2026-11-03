@@ -20,7 +20,10 @@ export class JwtTokenDoCliente implements TokenDoCliente {
 
   async verificar(token: string): Promise<{ clienteId: string } | null> {
     try {
-      const payload = await this.jwt.verifyAsync<PayloadCliente>(token);
+      // Algoritmo fixo, como na Lambda que emite o token: impede a troca por outro.
+      const payload = await this.jwt.verifyAsync<PayloadCliente>(token, {
+        algorithms: ['HS256'],
+      });
       if (payload?.papel !== PAPEL_CLIENTE || typeof payload.sub !== 'string') {
         return null;
       }
