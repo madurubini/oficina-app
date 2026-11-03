@@ -723,9 +723,10 @@ payloads e o princípio "comando automático não é rota".
 
 ## Vídeo demonstrativo
 
-**Fase 3:** *link a publicar após a gravação.* Mostra o login por CPF pelo Gateway, a rota
-protegida, os pipelines e o deploy nos dois ambientes, o monitoramento ao vivo no New Relic e os
-logs e traces de uma requisição.
+**Fase 3:** 🔗 *https://youtu.be/1gl2uN3bPr0*
+
+Mostra o login por CPF pelo Gateway, a rota protegida, os pipelines e o deploy nos dois ambientes,
+o monitoramento ao vivo no New Relic e os logs e traces de uma requisição.
 
 **Fase 2:** 🔗 *https://www.youtube.com/watch?si=QP-iADZR9Q7cpbh-&v=4WTo-nlOCAs&feature=youtu.be*
 
